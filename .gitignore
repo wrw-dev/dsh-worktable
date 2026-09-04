@@ -1,0 +1,9 @@
+node_modules/
+/lib/
+*.log
+*.map
+03_local/
+*.local.json
+.DS_Store
+Thumbs.db
+
