@@ -27,9 +27,16 @@
 
 - Declarative layout presets (left column / top row / main grid + right chat pane)
 - Draggable dividers, per-pane tabs, per-layout width persistence; **panes minimize** into a slim placeholder (freeing width for the row, click to restore), empty rows collapse
-- Built-in panes: **file explorer, terminal, browser, animation site, custom window**
+- Built-in panes: **file explorer, terminal, browser, animation site, custom window, preset resources**
 - Browser / animation panes: forward / back history, address bar synced both ways with in-page navigation (iframe navigations report back), `_blank` / `window.open` intercepted into in-pane navigation; external sites and local services embed through a **whole-origin reverse proxy** (X-Frame-Options / CSP embed limits stripped)
 - Custom window: send a requirement to a new or existing conversation; the agent builds it and the result auto-mounts into the window (locked)
+
+### 📌 Preset resources
+
+- Keep frequently used **browser links** (URL / account / password / note) and **local resources** (file or folder path / note) in a pinned pane, one click to open
+- Two open modes per entry: **workspace split** (embedded browser, or file preview for local files) or **external** (system default app, with copy-account / copy-password buttons)
+- Split-open of a login page auto-fills the staged account/password — **fills only, never submits**; staged data expires in 90 seconds and is wiped right after filling
+- File paths open as an in-pane file preview; folder paths open the file explorer at that folder
 
 ### 🖥️ Control room (built-in default project)
 
@@ -82,7 +89,7 @@
 
 One package ships the **host Cordis plugin** and the **web client**:
 
-- **host**: `/api/worktable/*` routes — health, file system, git, file read/write, site serving, mkdir, workspaces, native skin template, whole-origin reverse proxy (for the browser pane); WebSocket `/api/worktable/term` for the terminal pane (PowerShell on Windows)
+- **host**: `/api/worktable/*` routes — health, file system (files and folders), git, file read/write, site serving, mkdir, workspaces, native skin template, whole-origin reverse proxy (for the browser pane); WebSocket `/api/worktable/term` for the terminal pane (PowerShell on Windows)
 - **client**: injected into the sidebar and the shell overlay via the slot protocol; the split engine, tab model, drag/drop and persistence are self-built
 - **control room**: reads the host session list snapshot (running / pending / completed, jobs, subagent catalogs) — an event-driven mirror, no model involvement
 - **window tasks**: the agent writes `widget-result.json` into the project folder on completion; the client mounts the artifact into the addressed window and locks it
@@ -145,7 +152,7 @@ This issue has been reported to the DeepSeek Harness team and is being fixed; up
 
 ## Privacy
 
-No telemetry, no network calls beyond the host APIs and the plugin routes. All user state stays in localStorage. Optional update check: a read-only GET to the GitHub Releases API (automatic at most once a day, plus a manual "Check now" button); nothing is uploaded, and it can be disabled in Settings.
+No telemetry, no network calls beyond the host APIs and the plugin routes. All user state stays in localStorage. Optional update check: a read-only GET to the GitHub Releases API (automatic at most once a day, plus a manual "Check now" button); nothing is uploaded, and it can be disabled in Settings. Preset-resource credentials are obfuscated and stored in localStorage; the account/password used for split-open auto-fill is staged in plugin memory for 90 seconds and wiped right after filling — it is never written to disk.
 
 ---
 
