@@ -2,6 +2,7 @@ node_modules/
 /lib/
 *.log
 *.map
+*.tgz
 03_local/
 *.local.json
 .DS_Store

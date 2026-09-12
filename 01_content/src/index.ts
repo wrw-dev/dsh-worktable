@@ -1,17 +1,58 @@
 import { Context } from '@deepseek-ai/cordis'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { readdirSync, realpathSync } from 'node:fs'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdirSync, realpathSync, statSync } from 'node:fs'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, resolve as pathResolve, sep } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /**
+ * 基础数据目录解析：不加载任何官方包（loadPkg 的兜底只能用它，禁止反向调用包加载函数——否则成环）。
+ * 规则与官方 @deepseek-ai/dsh-home-paths 的 resolveDshHome 一致：
+ *   DSH_HOME 环境变量优先（空/纯空白视为未设置），否则 ~/.dsh；
+ *   支持 ~、~/、~\ 前缀展开；相对路径按进程 cwd 解析；结果归一为绝对路径。
+ * 禁止任何业务代码直接拼 homedir()/.dsh —— 自定义 DSH_HOME（Desktop/隔离测试）会读错数据。
+ */
+function baseDshHome(): string {
+  const env = process.env.DSH_HOME
+  // 与官方一致：trim 只用于判断是否全空白，实际路径保留原字符串（两端空格有含义）
+  const value = env !== undefined && env.trim().length > 0 ? env : pathResolve(homedir(), '.dsh')
+  if (value === '~') return homedir()
+  if (value.startsWith('~/') || value.startsWith('~\\')) return pathResolve(homedir(), value.slice(2))
+  return pathResolve(value)
+}
+
+/** 解析 DSH 数据根目录：优先官方 @deepseek-ai/dsh-home-paths（显式配置/DSH_HOME/默认），
+ *  不可用或返回非法值时回退 baseDshHome()（同官方规则）。带缓存。 */
+let cachedDshHome: string | null = null
+/** 本次解析实际走了哪条路径（供测试断言官方包是否真的被使用） */
+let dshHomeSource: 'official' | 'fallback' = 'fallback'
+function resolveDshHomeSafe(): string {
+  if (cachedDshHome) return cachedDshHome
+  try {
+    const pkg = loadPkg('@deepseek-ai/dsh-home-paths') as any
+    if (pkg && typeof pkg.resolveDshHome === 'function') {
+      const home = pkg.resolveDshHome(undefined, process.env)
+      if (typeof home === 'string' && home.trim() !== '') {
+        dshHomeSource = 'official'
+        cachedDshHome = home
+        return cachedDshHome
+      }
+    }
+  } catch {}
+  dshHomeSource = 'fallback'
+  cachedDshHome = baseDshHome()
+  return cachedDshHome
+}
+
+/**
  * dsh-worktable 服务端：健康路由 + 工作区内容窗的数据路由。
  * 参考 dsh-better-sidebar 的架构——内容窗能力由本插件自己的服务端路由提供：
- *   - POST /api/worktable/fs     目录列表（资源管理器窗）
+ *   - POST /api/worktable/fs     目录列表（资源管理器窗；路径为文件时返回 {file:true}，不再 500）
+ *   - POST /api/worktable/open-path  外部打开本地目录（预置资源管理；唤起系统资源管理器）
+ *   - POST /api/worktable/preset-fill[/done] 预置链接登录凭据 staging（纯内存，90 秒 TTL，用后即删）
  *   - POST /api/worktable/git    git 状态（源代码管理窗）
  *   - WS   /api/worktable/term   node-pty 终端流（终端窗；依赖宿主 node_modules 中的
  *                                node-pty 与 ws，缺失时该路由不注册、终端窗降级提示）
@@ -80,7 +121,9 @@ function embedRewriteSetCookie(sc: string): string {
  *  用 `*` 跨源发送（iframe 代理源 127.0.0.1:<port> 与父页面不同源，必须跨源）。
  *  目标源（原始 URL origin）在注入时写死，脚本把代理路径拼回真实地址上报。
  *  另拦截 target=_blank/_new 链接与 window.open：不再新开浏览器窗口，改为在当前窗内导航，
- *  并向上报（同目标源走当前代理；跨源则交给父页面起新代理）。 */
+ *  并向上报（同目标源走当前代理；跨源则交给父页面起新代理）。
+ *  预置资源管理：若该源有 staged 登录凭据（presetFillStage，见下方），额外注入只填不提交的
+ *  自动填充脚本——凭据只在用户点【打开】后 90 秒内有效，填充完成或过期即从服务端内存删除。 */
 function injectNavNotifyScript(html: string, targetOrigin: string): string {
   const originJson = JSON.stringify(targetOrigin)
   const script =
@@ -98,7 +141,39 @@ function injectNavNotifyScript(html: string, targetOrigin: string): string {
     'r()' +
     '})()<\/script>'
   const i = html.toLowerCase().indexOf('</head>')
-  return i >= 0 ? html.slice(0, i) + script + html.slice(i) : script + html
+  const base = i >= 0 ? html.slice(0, i) + script + html.slice(i) : script + html
+  // 预置资源管理：有 staged 凭据时叠加登录自动填充脚本（native setter 触发框架监听，
+  // 只填不提交；成功 postMessage 给父页面 → 客户端调 /preset-fill/done 删凭据）
+  const fill = presetFillStage.get(targetOrigin)
+  if (!fill) return base
+  const payload = JSON.stringify({ user: fill.user, pass: fill.pass })
+  const fillScript =
+    '<script>(function(){var D=' + payload + ';var done=false;' +
+    'function native(el,v){try{var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;' +
+    'var d=Object.getOwnPropertyDescriptor(proto,"value");if(d&&d.set)d.set.call(el,v);else el.value=v;' +
+    'el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}))}catch(e){}}' +
+    'function guess(el){if(!el)return null;var v=(el.name||"")+" "+(el.id||"")+" "+(el.getAttribute("autocomplete")||"")+" "+(el.placeholder||"")+' +
+    '(el.getBoundingClientRect?Array.prototype.slice.call(el.labels||[]).map(function(l){return l.textContent||""}).join(" "):"");return v.toLowerCase()}' +
+    'function isPw(el){return !!el&&el.type==="password"}' +
+    'function userLike(s){return /user|email|account|login|name|phone|mobile|mail/.test(s)}' +
+    'function fill(){try{var f=null,inputs=document.querySelectorAll("input");var pw=null;' +
+    'for(var i=0;i<inputs.length;i++){var el=inputs[i];var t=(el.type||"").toLowerCase();' +
+    'if(t==="hidden"||el.disabled||el.readOnly||el.offsetParent===null)continue;' +
+    'if(t==="password"){pw=el;continue}' +
+    'if((t==="text"||t==="email"||t==="tel")&&!pw){var g=guess(el);if(g&&userLike(g)){f=el;break}}}' +
+    'if(!pw){var forms=document.querySelectorAll("form");for(var j=0;j<forms.length;j++){var p=forms[j].querySelector(\'input[type="password"]\');if(p){pw=p;f=null;break}}}' +
+    'if(pw){var visible=function(el){return el&&el.offsetParent!==null};var target=null;' +
+    'if(visible(f))target=f;else{var form=pw.closest?pw.closest("form"):null;var cand=form?form.querySelectorAll("input"):document.querySelectorAll("input");' +
+    'for(var k=0;k<cand.length;k++){var ce=cand[k];var ct=(ce.type||"").toLowerCase();if(ct!=="text"&&ct!=="email"&&ct!=="tel")continue;' +
+    'if(ce===pw||ce.disabled||ce.readOnly||ce.offsetParent===null)continue;target=ce;break}}' +
+    'if(D.user&&target&&native(target,D.user),native(pw,D.pass),!done){done=true;' +
+    'try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}return true}return false}catch(e){return false}}' +
+    'if(fill())return;' +
+    'var n=0;var iv=setInterval(function(){n++;if(fill()||n>60){clearInterval(iv);if(n>60&&!done){try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}}},500);' +
+    'document.addEventListener("DOMContentLoaded",function(){if(!done)fill()})' +
+    '})()<\/script>'
+  const j = base.toLowerCase().lastIndexOf('</body>')
+  return j >= 0 ? base.slice(0, j) + fillScript + base.slice(j) : base + fillScript
 }
 
 interface EmbedProxy {
@@ -252,6 +327,16 @@ function originOf(u: string): string | null {
   } catch { return null }
 }
 
+// —— 预置资源管理：分栏打开的登录凭据 staging（内存态，90 秒 TTL，用后即删；不落盘） ——
+interface PresetFill { user: string; pass: string; exp: number }
+const presetFillStage = new Map<string, PresetFill>()
+const PRESET_FILL_TTL_MS = 90_000
+
+function presetFillSweep(): void {
+  const now = Date.now()
+  for (const [k, v] of presetFillStage) if (now > v.exp) presetFillStage.delete(k)
+}
+
 // 原生皮肤模板（esbuild text loader 嵌入；/api/worktable/template 路由直接下发）
 // @ts-ignore
 import dshellCss from '../template/dshell.css'
@@ -264,6 +349,8 @@ const TEMPLATE_PREFIX = '/api/worktable/template'
  * 本包经 junction 链接进 profile，普通 import 可能解析不到 profile 级依赖；
  * 同时尝试 junction 路径与 realpath 两条祖先链。
  */
+/** 依赖探测尝试计数（供测试断言「有界探测、无循环重入」） */
+let loadProbeAttempts = 0
 function loadPkg(pkg: string): any | null {
   const starts = new Set<string>()
   try { starts.add(dirname(fileURLToPath(import.meta.url))) } catch {}
@@ -271,6 +358,7 @@ function loadPkg(pkg: string): any | null {
   for (const start of starts) {
     let dir: string | null = start
     while (dir && dir !== pathResolve(dir, '..')) {
+      loadProbeAttempts++
       try {
         const req = createRequire(pathToFileURL(pathResolve(dir, '__wt_probe__.js')).href)
         return req(pkg)
@@ -278,12 +366,13 @@ function loadPkg(pkg: string): any | null {
       dir = pathResolve(dir, '..')
     }
   }
-  // 兜底：DSH 标准目录 ~/.dsh/profiles/*/node_modules（宿主按 realpath 加载时前两条链都找不到）
+  // 兜底：DSH profiles/*/node_modules（按 baseDshHome 解析根目录——不能用 resolveDshHomeSafe，否则与本函数成环）
   try {
-    const profilesDir = pathResolve(homedir(), '.dsh', 'profiles')
+    const profilesDir = pathResolve(baseDshHome(), 'profiles')
     for (const profile of readdirSync(profilesDir, { withFileTypes: true })) {
       if (!profile.isDirectory() && !profile.isSymbolicLink()) continue
       const nm = pathResolve(profilesDir, profile.name, 'node_modules')
+      loadProbeAttempts++
       try {
         const req = createRequire(pathToFileURL(pathResolve(nm, '__wt_probe__.js')).href)
         return req(pkg)
@@ -291,6 +380,11 @@ function loadPkg(pkg: string): any | null {
     }
   } catch {}
   return null
+}
+
+/** 测试钩子：依赖探测尝试次数 + 数据目录解析路径（循环回归与官方路径断言用） */
+export function __wtLoadProbeStats(): { attempts: number; homeSource: 'official' | 'fallback' } {
+  return { attempts: loadProbeAttempts, homeSource: dshHomeSource }
 }
 
 /** 解析会话工作目录：服务端 header.cwd 优先，其次客户端传入 cwd，最后进程 cwd */
@@ -318,9 +412,12 @@ async function readJsonBody(req: any): Promise<any> {
   try { return JSON.parse(text) } catch { return {} }
 }
 
-/** 列出一个目录层级（目录在前、大小写不敏感排序、上限 500、隐藏项标注） */
+/** 列出一个目录层级（目录在前、大小写不敏感排序、上限 500、隐藏项标注）；
+ *  路径指向文件时返回 { file:true }（预置资源可存文件路径，由客户端转文件预览标签，不再 500） */
 async function listDirectory(path: string) {
   const abs = pathResolve(path)
+  const info = await stat(abs)
+  if (info.isFile()) return { path: abs, entries: [], truncated: false, file: true }
   const dirents = await readdir(abs, { withFileTypes: true })
   const entries = dirents
     .map((d) => ({ name: d.name, path: abs + sep + d.name, isDir: d.isDirectory(), hidden: d.name.startsWith('.') }))
@@ -561,13 +658,109 @@ export function apply(ctx: Context) {
     },
   })
 
-  // 工作区列表（自定义窗口会话分组用）：读宿主 ~/.dsh/storages/workspace.json（只读）
+  // 预置资源管理：暂存分栏打开的登录凭据（仅内存、90 秒 TTL；该源代理 HTML 注入只填不提交脚本）
+  webServer.register({
+    kind: 'exact',
+    path: '/api/worktable/preset-fill',
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method !== 'POST') { json(res, 405, { ok: false }); return }
+        const body = await readJsonBody(req)
+        const origin = typeof body.origin === 'string' ? originOf(body.origin) : null
+        if (!origin) { json(res, 400, { ok: false, error: 'bad origin' }); return }
+        presetFillSweep()
+        presetFillStage.set(origin, {
+          user: typeof body.user === 'string' ? body.user : '',
+          pass: typeof body.pass === 'string' ? body.pass : '',
+          exp: Date.now() + PRESET_FILL_TTL_MS,
+        })
+        json(res, 200, { ok: true })
+      } catch (err) {
+        json(res, 500, { ok: false, error: String(err) })
+      }
+    },
+  })
+
+  // 预置资源管理：填充完成上报 → 立即删除该源凭据（用后即弃；即使页面无登录表单也上报清理）
+  webServer.register({
+    kind: 'exact',
+    path: '/api/worktable/preset-fill/done',
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method !== 'POST') { json(res, 405, { ok: false }); return }
+        const body = await readJsonBody(req)
+        const origin = typeof body.origin === 'string' ? originOf(body.origin) : null
+        if (origin) presetFillStage.delete(origin)
+        json(res, 200, { ok: true })
+      } catch (err) {
+        json(res, 500, { ok: false, error: String(err) })
+      }
+    },
+  })
+
+  // 预置资源管理：外部打开本地目录 —— 唤起系统资源管理器并定位到该目录（Windows explorer /eval，不读盘不写盘）
+  webServer.register({
+    kind: 'exact',
+    path: '/api/worktable/open-path',
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method !== 'POST') { json(res, 405, { ok: false }); return }
+        const body = await readJsonBody(req)
+        const p = typeof body.path === 'string' ? body.path.trim() : ''
+        if (!/^[A-Za-z]:[\\/]/.test(p) && !p.startsWith('\\\\') && !p.startsWith('/')) {
+          json(res, 400, { ok: false, error: 'absolute path required' }); return
+        }
+        if (process.platform === 'win32') {
+          spawn('explorer', [p], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+        } else {
+          const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
+          execFile(opener, [p], () => {})
+        }
+        json(res, 200, { ok: true })
+      } catch (err) {
+        json(res, 500, { ok: false, error: String(err) })
+      }
+    },
+  })
+
+  // 工作区列表（自定义窗口会话分组用）：
+  // 优先走宿主正式服务 ctx.workspaceRegistry（0.1.1/0.1.2 均有，正确感知 DSH_HOME 与存储后端）；
+  // 不可用时回退按 resolveDshHomeSafe() 读 storages/workspace.json（只读）。
+  // 返回结构是客户端契约，两种来源都映射成同一 shape。
   webServer.register({
     kind: 'exact',
     path: '/api/worktable/workspaces',
     handler: async (_req: any, res: any) => {
       try {
-        const file = pathResolve(homedir(), '.dsh', 'storages', 'workspace.json')
+        // cordis 对未 inject 服务的属性访问会直接 throw（不返回 undefined），必须 try-catch 探测
+        let registry: any = null
+        try { registry = (ctx as any).workspaceRegistry ?? null } catch {}
+        if (!registry) {
+          try { registry = ctx.get?.('workspaceRegistry') ?? null } catch {}
+        }
+        if (registry && typeof registry.list === 'function') {
+          const list = registry.list() ?? []
+          const workspaceIds: string[] = []
+          const tables: Record<string, { title?: string; sessionIds?: string[] }> = {}
+          for (const ws of list) {
+            const id = String(ws?.id ?? '')
+            if (!id) continue
+            workspaceIds.push(id)
+            tables[id] = {
+              title: typeof ws?.title === 'string' ? ws.title : undefined,
+              sessionIds: Array.isArray(ws?.sessionIds) ? ws.sessionIds.map(String) : [],
+            }
+          }
+          let archived: string[] = []
+          try { archived = (registry.archivedSessionIds ?? []).map(String) } catch {}
+          json(res, 200, {
+            unit: { name: 'workspace', version: 2 },
+            global: { initialized: true, workspaceIds, archivedSessionIds: archived },
+            tables: { workspaces: tables },
+          })
+          return
+        }
+        const file = pathResolve(resolveDshHomeSafe(), 'storages', 'workspace.json')
         const raw = await readFile(file, 'utf8')
         // 容忍 BOM（外部工具改写可能带 EF BB BF，JSON.parse 会抛错）
         json(res, 200, JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw))

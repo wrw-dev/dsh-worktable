@@ -334,7 +334,8 @@ type SplitPane = {
 ### 13.4 内容插件协议 PaneProvider
 
 - 内容三态：`iframe`（同源 URL，主推）/ `component`（插件打包 React 组件）/ `builtin`（工作台内置）；
-- builtin 注册表：工作台内置「浏览器」；资源管理器 / 终端 / 任务管理作为后续内容插件逐个接入；
+- builtin 注册表（2026-09-12 更新）：浏览器 / 动画 / 资源管理器 / 源代码管理 / 任务管理 / 终端 /
+  控制台 / **预置资源（presets，📌，窗格选择器中位于「＋自定义」之前）**；
 - 内容插件 = 独立 DSH 插件包，经专用座位或注册表挂载，不硬编码进工作台本体。
 
 ### 13.5 「+」面板改版
@@ -389,7 +390,13 @@ type SplitPane = {
 ### 13.6 持久化
 
 - `dsh.worktable.layouts.v1` = `{ [layoutId]: LayoutSpec + 分隔线比例 }`；
-- 聊天窗宽度语义同 §12.4：240 起、上限 = 行/列尺寸 − 相邻内容窗最小宽。
+- 聊天窗宽度语义同 §12.4：240 起、上限 = 行/列尺寸 − 相邻内容窗最小宽；
+- 分栏标签内容随布局条目持久化（`SplitContent.builtin` 为可选字段读时兜底）：2026-09-12 起
+  `explorer` 窗可携带 `rootPath`（预置资源「工作台分栏打开」直接落到指定目录的 ExplorerPane）；
+- 预置资源条目存 `dsh.worktable.presets.v1`（PresetEntry[]：kind url/dir、名称/URL/资源路径（目录或文件）、
+  账号/密码（XOR+Base64 混淆，非加密）、备注、打开模式 split/external）——独立于布局数据，
+  打开时才写入分栏标签。dir 条目分栏打开时先经 /api/worktable/fs 探测：文件 → 文件预览标签
+  （FileViewer：MD/PDF/图片/文本）、目录 → ExplorerPane（2026-09-14 起，修复文件路径 500）。
 
 ### 13.7 内容窗可行性记录（2026-08-16）
 
@@ -401,6 +408,7 @@ type SplitPane = {
 | 终端 | ✅ 已实现（第一版） | WS /api/worktable/term + node-pty + xterm（宿主缺 node-pty 时降级提示） |
 | 任务管理 | ✅ 已实现（第一版） | 客户端 sessions 快照 jobsBySession（后台任务列表，2s 刷新） |
 | 自定义 vibe | ✅ 可闭环 | 描述需求 → agent 生成新项目（插件/站点）→ 注册进工作台（UI 已留 ✨ 入口）。✨ 自定义窗两模式（新建对话/发送到会话）点发送后调用宿主 sessions.open(会话id)，右侧对话窗自动切到目标会话（2026-08-18 无头探针实测 switched=true） |
+| 预置资源 | ✅ 已实现（第一版，2026-09-12） | 窗格选择器 📌 磁贴；条目两类（浏览器链接 / 本地资源路径（目录或文件））× 两种打开模式（工作台分栏 = BrowserPane 走 /embed 代理（凭据自动填充，只填不提交）；路径先 /fs 探测——目录挂 ExplorerPane rootPath、文件直接开 FileViewer 文件预览标签；外部 = window.open 或 /api/worktable/open-path→explorer.exe）。增删改查 + 密码掩码 + URL/路径校验 + 复制账号/密码按钮（外部打开无自动填充的补偿） |
 
 ### 13.8 里程碑
 

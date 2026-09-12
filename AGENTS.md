@@ -195,3 +195,16 @@ node --check lib/index.js
 - 发布版安装（给用户）：`dsh plugin --profile web add "https://github.com/Aisland-SJL/dsh-worktable/releases/latest/download/dsh-worktable.tgz"`（依赖每个 Release 的固定名资产）。
 - bundle 层只在启动时组合：改动后必须重启 dsh web 并刷新 GUI。
 
+## 本机开发安装形态（2026-09-12 定案）
+
+- `~/.dsh/profiles/web/node_modules/dsh-worktable` 已从「安装器硬链接拷贝」替换为
+  **junction → `<repo>/01_content`**（同 dsh-spring-widget 模式）：esbuild 构建会整文件替换
+  （硬链接断裂，profile 侧停留在旧构建——曾导致热重载 fiber active 但新路由永远 401 的假象）；
+  junction 后构建即生效（服务端热重载免搬运；本服务端 bundle 零外部静态导入、ws/node-pty
+  走 profiles 兜底探测，junction 解析安全）。
+- **热重载流程（必须）**：服务端路由是裸 `webServer.register`（不走 ctx.effect），不随 fiber
+  释放、跨重载泄漏 → 每次热重载前先 `dev_clear_routes /api/worktable`，否则 health 路由
+  duplicate、fiber failed（终端 upgrade 走 ctx.effect，会正确消失与恢复）。
+- 若用 tgz 重装本插件，安装器会把 junction 打回拷贝形态：重装后需重建 junction（或接受
+  拷贝形态 + 每次构建后把 lib 搬运到 profile 侧）。
+

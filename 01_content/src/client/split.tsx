@@ -1,6 +1,10 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { parentPathOf } from './pathutil'
+import { CHANGELOG_V030 } from './changelog'
+import { LOCAL_VERSION, checkUpdate, getAutoCheck, readCache, setAutoCheck as storeAutoCheck, setSkipVersion, type UpdateInfo, type UpdateStatus } from './updateCheck'
 import { Terminal } from 'xterm'
+import { loadPresets, revealSecret, consumePresetFill, listenPresetFill, autoName, type PresetEntry } from './presets'
+import { PresetsPane } from './presetsPane'
 
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
@@ -24,11 +28,11 @@ hljs.registerLanguage('json', hljsJson)
  * 内容与 chatSide 的变更经 onSpecMutated 回调交给工作台持久化（布局条目）。
  */
 
-export type BuiltinType = 'browser' | 'anim' | 'explorer' | 'scm' | 'tasks' | 'terminal' | 'custom' | 'console'
+export type BuiltinType = 'browser' | 'anim' | 'explorer' | 'scm' | 'tasks' | 'terminal' | 'custom' | 'console' | 'presets'
 
 export type SplitContent =
   | { kind: 'iframe'; url: string; title?: string }
-  | { kind: 'builtin'; type: BuiltinType; url?: string }
+  | { kind: 'builtin'; type: BuiltinType; url?: string; rootPath?: string }
   | { kind: 'file'; path: string }
 
 /** 一个内容标签页 */
@@ -46,6 +50,8 @@ export type SplitPane = {
   active?: number
   /** 窗格最小化：整窗收成一条窄占位，释放宽度给同行；点击占位条还原（窄条占位 + 让出空间） */
   minimized?: boolean
+  /** 窗格最大化：占满整个内容区（其他窗临时隐藏）；同一时刻至多一个窗格最大化 */
+  maximized?: boolean
 }
 
 export type LayoutSpec = {
@@ -70,7 +76,7 @@ export type LayoutSpec = {
 
 type Geom = { left: number; top: number; right: number; bottom: number }
 
-type PaneRow = 'left' | 'top' | 'main'
+export type PaneRow = 'left' | 'top' | 'main'
 
 type SplitState = {
   active: boolean
@@ -90,6 +96,8 @@ type SplitState = {
   savedMarginLeft: string
   savedMarginRight: string
   savedMarginTop: string
+  /** 打开前会话根上 --dsh-chat-user-width 的内联值（关闭时原样恢复；0.1.1 上该变量闲置无害） */
+  savedWidthVar: string
   observer: ResizeObserver | null
   fallback: MutationObserver | null
   yieldObserver: MutationObserver | null
@@ -122,6 +130,8 @@ type SplitState = {
   setPaneContent(row: PaneRow, i: number, content: SplitContent | null): void
   /** 最小化 / 还原指定窗格（窄条占位，切换后通知重分配） */
   setPaneMinimized(row: PaneRow, i: number, minimized: boolean): void
+  /** 最大化/还原窗格（true = 独占内容区；单选语义：最大化 B 时自动还原 A） */
+  setPaneMaximized(row: PaneRow, i: number, maximized: boolean): void
   openTab(row: PaneRow, i: number, content: SplitContent): void
   /** 锁定窗格：清空原有标签，把内容作为该窗唯一的固定标签（挂载产物的「锁死」语义） */
   lockPane(row: PaneRow, i: number, content: SplitContent): void
@@ -136,7 +146,8 @@ type SplitState = {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
-const DIVIDER = 4
+const GAP = 1           // 窗格之间真实布局间隙：1px（分隔细线即间隙，底色贴线）
+const DIVIDER = 4       // 分隔条热区宽度：透明覆盖层，细线画在热区中间与两侧内容贴齐
 const BAR_H = 26
 /** 标题栏右端预留：宿主顶部条右上角有 better-sidebar 等插件的图标按钮（展开底部面板/侧边栏等）。
  *  分栏标题栏 fixed 定位，若顶格到容器最右会覆盖那些按钮导致无法点击——留出此宽度避让。 */
@@ -153,6 +164,7 @@ const BUILTIN_ICONS: Record<BuiltinType, string> = {
   terminal: '▸_',
   custom: '✨',
   console: '🖥️',
+  presets: '📌',
 }
 
 const BUILTIN_LABEL_KEYS: Record<BuiltinType, string> = {
@@ -164,6 +176,7 @@ const BUILTIN_LABEL_KEYS: Record<BuiltinType, string> = {
   terminal: 'pane.terminal',
   custom: 'pane.custom',
   console: 'pane.console',
+  presets: 'pane.presets',
 }
 
 function tabTitleOf(content: SplitContent): string {
@@ -190,11 +203,17 @@ function miniTitleOf(pane: SplitPane): string {
   return pane.title || pane.tabs?.[pane.active ?? 0]?.title || '…'
 }
 
-/** 内容同一性（openTab 去重：同窗内同内容只保留一个标签，再次打开切过去） */
+/** 内容同一性（openTab 去重：同窗内同内容只保留一个标签，再次打开切过去）
+ *  builtin 细化：browser/anim 比较地址；explorer 比较根目录；其余类型仍按类型去重 */
 function sameContent(a: SplitContent, b: SplitContent): boolean {
   if (a.kind === 'iframe' && b.kind === 'iframe') return a.url === b.url
   if (a.kind === 'file' && b.kind === 'file') return a.path === b.path
-  if (a.kind === 'builtin' && b.kind === 'builtin') return a.type === b.type
+  if (a.kind === 'builtin' && b.kind === 'builtin') {
+    if (a.type !== b.type) return false
+    if (a.type === 'browser' || a.type === 'anim') return (a.url ?? '') === (b.url ?? '')
+    if (a.type === 'explorer') return (a.rootPath ?? '') === (b.rootPath ?? '')
+    return true
+  }
   return false
 }
 
@@ -203,7 +222,7 @@ let uiT: ((key: string, params?: Record<string, string>) => string) | null = nul
 export function setSplitT(fn: ((key: string, params?: Record<string, string>) => string) | null) {
   uiT = fn
 }
-const T = (key: string, params?: Record<string, string>): string => (uiT ? uiT(key, params) : key)
+export const T = (key: string, params?: Record<string, string>): string => (uiT ? uiT(key, params) : key)
 
 /** 工作区环境（由工作台注入：当前会话作用域与后台任务列表） */
 export type SplitScope = { sessionId: string; cwd: string }
@@ -263,6 +282,41 @@ type SplitEnv = {
     onAdd: () => void
     getTheme: () => 'dark' | 'light' | 'system'
     setTheme: (th: 'dark' | 'light' | 'system') => void
+    getCols: () => number
+    setCols: (n: number) => void
+    getShape: () => 'square' | 'circle'
+    setShape: (s: 'square' | 'circle') => void
+    getBg: () => 'plain' | 'glow' | 'photo'
+    setBg: (m: 'plain' | 'glow' | 'photo') => void
+    getPhotoLib: () => Promise<{ list: { id: string; kind: 'photo' | 'video'; url: string }[]; activeId: string | null }>
+    addPhoto: (blob: Blob) => Promise<{ id: string; kind: 'photo' | 'video'; url: string }>
+    setPhotoId: (id: string) => void
+    getPhotoHsl: (id: string) => { h: number; s: number; l: number }
+    setPhotoHsl: (id: string, v: { h: number; s: number; l: number }) => void
+    removePhoto: (id: string) => Promise<void>
+    reorderPhotos: (ids: string[]) => Promise<void>
+    getPhotoGrid: () => boolean
+    setPhotoGrid: (v: boolean) => void
+    getGridOpacity: () => number
+    setGridOpacity: (v: number) => void
+    getCardBlur: () => number
+    setCardBlur: (v: number) => void
+    getPlainBlur: () => number
+    setPlainBlur: (v: number) => void
+    getGlowBlur: () => number
+    setGlowBlur: (v: number) => void
+    getPlainGrid: () => number
+    setPlainGrid: (v: number) => void
+    getGlowGrid: () => number
+    setGlowGrid: (v: number) => void
+    getGlowSpeed: () => number
+    setGlowSpeed: (v: number) => void
+    getPlainHsl: () => { h: number; s: number; l: number }
+    setPlainHsl: (v: { h: number; s: number; l: number }) => void
+    getGlowHsl: () => { h: number; s: number; l: number }
+    setGlowHsl: (v: { h: number; s: number; l: number }) => void
+    getPhotoHsl: () => { h: number; s: number; l: number }
+    setPhotoHsl: (v: { h: number; s: number; l: number }) => void
   }
   /** 多会话绑定：当前布局的绑定会话列表（含标题与运行态）+ 切换回调；多绑时标题栏显示切换器 */
   sessionSwitcher?: {
@@ -277,7 +331,7 @@ export function setSplitEnv(env: SplitEnv | null) {
   splitEnv = env
 }
 
-async function postJson(url: string, body: unknown): Promise<any> {
+export async function postJson(url: string, body: unknown): Promise<any> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -298,13 +352,415 @@ function setDropTarget(t: { row: PaneRow; index: number } | null) {
   for (const fn of dropTargetListeners) fn()
 }
 
-/** 找到会话根容器：data-phase 元素中排除输入框、取含子元素者；优先 phase=active；无活动会话返回 null */
+/** 预置资源管理：分栏打开预置链接后，代理页面里的填充脚本每次尝试完成（无论是否找到登录表单）
+ *  都会上报——任何一次上报即清 staged 凭据（用后即弃）；onMsg 过滤由 presets.ts 负责 */
+listenPresetFill(consumePresetFill)
+
+/** ——「指哪打哪」标注引擎：按钮 → 蓝色冒泡光标 → 点击弹输入框 → ✓ 打包进对话框（不发送） —— */
+type AnnotState = {
+  on: boolean
+  started: boolean
+  drawing: boolean
+  px: number
+  py: number
+  bx0: number
+  by0: number
+  bx1: number
+  by1: number
+  ex: number
+  ey: number
+  draft: string
+  resp: string
+  stat: string
+}
+let annotState: AnnotState = { on: false, started: false, drawing: false, px: 0, py: 0, bx0: 0, by0: 0, bx1: 0, by1: 0, ex: 0, ey: 0, draft: '', resp: '', stat: '' }
+const annotListeners = new Set<() => void>()
+function setAnnot(patch: Partial<AnnotState>) {
+  annotState = { ...annotState, ...patch }
+  for (const fn of annotListeners) fn()
+}
+function subscribeAnnot(fn: () => void) { annotListeners.add(fn); return () => { annotListeners.delete(fn) } }
+
+/** 进入瞄准模式（resp = 窗口编号等上下文，由调用方拼好） */
+function startAnnot(resp: string) {
+  document.body.classList.add('dsh-wt-annotating')
+  setAnnot({ on: true, started: false, drawing: false, resp, stat: '', draft: '' })
+}
+function cancelAnnot() {
+  document.body.classList.remove('dsh-wt-annotating')
+  setAnnot({ on: false, started: false, drawing: false })
+}
+
+/** 窗口身份（约定：左栏 → 顶行 → 主行，从 1 起；附窗格标题与内容类型/URL，让接收方无需猜"这是哪个界面"） */
+function windowLabelOf(row: PaneRow, index: number): string {
+  const spec = splitStore.spec
+  if (!spec) return '窗口?'
+  let num = spec.left ? 2 : 1
+  if (row === 'left') num = 1
+  else if (row === 'top') num = num + index
+  else { num += (spec.top?.length ?? 0) + index }
+  let label = '窗口' + num
+  const pane = row === 'left' ? spec.left : row === 'top' ? spec.top?.[index] : spec.main?.[index]
+  const title = pane?.title
+  if (title) label += '「' + title + '」'
+  const tab = pane?.tabs?.[pane.active ?? 0]
+  const c = tab?.content
+  if (c) {
+    try {
+      if (c.kind === 'iframe' && c.url) label += '（网页 ' + new URL(c.url).hostname + '）'
+      else if (c.kind === 'builtin') {
+        label += '（内置·' + c.type
+        try { if (c.url) label += ' ' + new URL(c.url).hostname } catch {}
+        label += '）'
+      }
+      else if (c.kind === 'file') label += '（文件）'
+    } catch {}
+  }
+  return label
+}
+
+/** 被点元素上下文（标签 + 类名 + 文字） */
+function ctxOf(t: EventTarget | null): string {
+  const el = t instanceof Element ? t : null
+  if (!el || el === document.documentElement || el === document.body) return ''
+  const tag = el.tagName.toLowerCase()
+  const cls = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean).slice(0, 4).join('.')
+  const text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60)
+  let out = '<' + tag + (cls ? ' .' + cls : '') + '>'
+  if (text) out += '「' + text + '」'
+  try { const cs = getComputedStyle(el); out += '（字号 ' + cs.fontSize + '）' } catch {}
+  return out
+}
+
+/** 框选 payload v3.1：主目标 = 框中心点【光标下的字符】所在的 Text 节点（caretPositionFromPoint，
+ *  标签即使不是独立元素也能取到真正的词/段）；样式取该 Text 节点的父元素（真实渲染值）；
+ *  整行 = 最近的高度≤44px 祖先的内容（供「这行字是什么」类问题）；候选 = 相交的独立短文本。 */
+function boxPayload(x0: number, y0: number, x1: number, y1: number): { primary: { text: string; fontSize: string; lineHeight: string; color: string } | null; line: string; candidates: string[]; limited: boolean; src: string } {
+  const L = Math.min(x0, x1)
+  const T = Math.min(y0, y1)
+  const R = Math.max(x0, x1)
+  const B = Math.max(y0, y1)
+  const cx = (L + R) / 2
+  const cy = (T + B) / 2
+  let primary: { text: string; fontSize: string; lineHeight: string; color: string } | null = null
+  let line = ''
+  let candidates: string[] = []
+  let limited = false
+  let src = ''
+  // 在某 document 内取字（rect = 该 doc 视口在顶层页面的偏移）
+  const readDoc = (doc: Document, ox: number, oy: number): boolean => {
+    let ok = false
+    let textParent: HTMLElement | null = null
+    try {
+      const pd = doc as any
+      const px = cx - ox
+      const py = cy - oy
+      let pos: any = null
+      try { if (pd.caretPositionFromPoint) pos = pd.caretPositionFromPoint(px, py) } catch {}
+      if (!pos) { try { if (pd.caretRangeFromPoint) pos = pd.caretRangeFromPoint(px, py) } catch {} }
+      const textNode: Node | null = pos ? (pos.offsetNode ?? pos.startContainer ?? null) : null
+      if (textNode) {
+        const parent = textNode.parentElement
+        if (parent) {
+          textParent = parent
+          const text = (textNode.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60)
+          if (text) {
+            const cs = getComputedStyle(parent)
+            primary = { text, fontSize: cs.fontSize, lineHeight: cs.lineHeight, color: cs.color }
+            ok = true
+          }
+        }
+      }
+    } catch {}
+    // 整行
+    if (textParent) {
+      try {
+        let el: HTMLElement | null = textParent
+        while (el && el !== doc.body) {
+          const r = el.getBoundingClientRect()
+          if (r.height >= 8 && r.height <= 44 && r.width > 0) {
+            const t = (el.innerText || '').replace(/\s+/g, ' ').trim()
+            if (t) { line = t.slice(0, 120); break }
+          }
+          el = el.parentElement
+        }
+      } catch {}
+    }
+    // 候选
+    const seen = new Set<string>()
+    if (primary) seen.add(primary.text)
+    const cs: string[] = []
+    try {
+      for (const el of Array.from(doc.querySelectorAll<HTMLElement>('*'))) {
+        const tag = el.tagName.toLowerCase()
+        if (tag === 'script' || tag === 'style' || tag === 'svg' || tag === 'path' || tag === 'br' || tag === 'template' || tag === 'iframe') continue
+        const rect = el.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) continue
+        if (rect.right + ox < L || rect.left + ox > R || rect.bottom + oy < T || rect.top + oy > B) continue
+        const text = (el.textContent || '').trim().replace(/\s+/g, ' ')
+        if (text.length < 1 || text.length > 30) continue
+        if (seen.has(text)) continue
+        seen.add(text)
+        cs.push(text)
+        if (cs.length >= 4) break
+      }
+    } catch {}
+    if (ok || cs.length > 0) candidates = cs
+    return ok
+  }
+  // 1) 顶层文档
+  readDoc(document, 0, 0)
+  // 2) 顶层取不到 → 中心点所在 iframe 下钻（同源可读；跨域标记受限于 src）
+  if (!primary) {
+    try {
+      for (const iframe of Array.from(document.querySelectorAll<HTMLIFrameElement>('iframe'))) {
+        try {
+          const r = iframe.getBoundingClientRect()
+          if (r.width <= 0 || r.height <= 0) continue
+          if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) continue
+          src = iframe.getAttribute('src') ?? ''
+          let inner: Document | null = null
+          try { inner = iframe.contentDocument } catch { inner = null }
+          if (inner) readDoc(inner, r.left, r.top)
+          else limited = true
+          break
+        } catch { continue }
+      }
+    } catch {}
+  }
+  return { primary, line, candidates, limited, src }
+}
+
+/** 更新方法：复制给 AI 的升级指令（插件不自更新；升级由用户或其 Agent 执行 + 重启） */
+const UPGRADE_CMD = 'dsh plugin --profile web add "https://github.com/Aisland-SJL/dsh-worktable/releases/latest/download/dsh-worktable.tgz"'
+const UPGRADE_AI = '帮我升级 dsh-worktable：执行 ' + UPGRADE_CMD + '，完成后提醒我重启 dsh web 并刷新页面'
+
+async function copyTextSafe(text: string): Promise<boolean> {
+  try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true } } catch {}
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
+}
+
+/** 注入宿主对话框输入框（不发送）；失败返回 false */
+function fillHostInput(text: string): boolean {
+  try {
+    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
+      ?? Array.from(document.querySelectorAll<HTMLTextAreaElement>('textarea')).pop()
+    if (!ta) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    // 连续标注：已有内容不顶掉，换行追加（用户可以同一对话连续标注多处）
+    const next = ta.value && ta.value.trim() ? ta.value + '\n\n' + text : text
+    if (setter) setter.call(ta, next)
+    else ta.value = next
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    try {
+      ta.focus()
+      ta.dispatchEvent(new Event('change', { bubbles: true }))
+      ta.setSelectionRange(ta.value.length, ta.value.length)
+    } catch {}
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** ✓ 确认：打包并注入，不发送 */
+function confirmAnnot() {
+  const s = annotState
+  const text = '📌 标注-' + s.resp + '\n' + (s.stat || '') + '\n要求：' + (s.draft.trim() || '（未填写）')
+    + '\n【工作台标注·已定位，直接作答，无需再问；仅当确实无法从标注定位时才问一次。数据缺失或标注标注读取受限时，如实说明无法确定，禁止编造数值；可建议提供截图或使用视觉模型会话】'
+  const ok = fillHostInput(text)
+  if (!ok) {
+    try {
+      navigator.clipboard?.writeText(text).catch(() => { try { window.prompt('标注已生成，请手动复制：', text) } catch {} })
+    } catch {
+      try { window.prompt('标注已生成，请手动复制：', text) } catch {}
+    }
+  }
+  cancelAnnot()
+}
+
+/** 标注浮层：瞄准气泡 + 输入编辑器（每个工作区渲染一次；fixed 定位） */
+function AnnotationOverlay() {
+  const [, setTick] = useState(0)
+  useEffect(() => subscribeAnnot(() => setTick((t) => t + 1)), [])
+  const s = annotState
+  useEffect(() => {
+    if (!s.on || s.started) return
+    let sx = 0
+    let sy = 0
+    let dragging = false
+    const isUi = (e: MouseEvent) => e.target instanceof Element && e.target.closest('.dsh-wt_annotUi') != null
+    const onMove = (e: MouseEvent) => {
+      if (!annotState.on || annotState.started) return
+      if (annotState.drawing) setAnnot({ bx1: e.clientX, by1: e.clientY, px: e.clientX, py: e.clientY })
+      else setAnnot({ px: e.clientX, py: e.clientY })
+    }
+    const onDown = (e: MouseEvent) => {
+      if (!annotState.on || annotState.started || isUi(e)) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      sx = e.clientX
+      sy = e.clientY
+      dragging = true
+      setAnnot({ drawing: true, bx0: sx, by0: sy, bx1: sx, by1: sy })
+    }
+    const onUp = (e: MouseEvent) => {
+      if (!annotState.on || annotState.started || !dragging) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      dragging = false
+      const w = Math.abs(e.clientX - sx)
+      const h = Math.abs(e.clientY - sy)
+      const paneEl = (e.target instanceof Element ? e.target.closest('.dsh-wt_pane') : null) as HTMLElement | null
+      let stat = ''
+      if (Math.max(w, h) >= 8) {
+        // 框选：中心/宽高 + 窗口内百分比 + 框内可见文字聚合
+        const L = Math.min(sx, e.clientX)
+        const T = Math.min(sy, e.clientY)
+        const R = Math.max(sx, e.clientX)
+        const B = Math.max(sy, e.clientY)
+        stat = '框选屏幕 (' + Math.round(L) + ',' + Math.round(T) + ') → (' + Math.round(R) + ',' + Math.round(B) + ') 宽高 (' + Math.round(w) + '×' + Math.round(h) + 'px)'
+        if (paneEl) {
+          const pr = paneEl.getBoundingClientRect()
+          const rx1 = (((L - pr.left) / Math.max(1, pr.width)) * 100).toFixed(1)
+          const ry1 = (((T - pr.top) / Math.max(1, pr.height)) * 100).toFixed(1)
+          const rx2 = (((R - pr.left) / Math.max(1, pr.width)) * 100).toFixed(1)
+          const ry2 = (((B - pr.top) / Math.max(1, pr.height)) * 100).toFixed(1)
+          stat += '，窗口内 (' + rx1 + '%,' + ry1 + '%)→(' + rx2 + '%,' + ry2 + '%)'
+        }
+        const hit = boxPayload(L, T, R, B)
+        if (hit.primary) stat += '，主目标：' + hit.primary.text + '（字号 ' + hit.primary.fontSize + '，行高 ' + hit.primary.lineHeight + '）'
+        if (hit.line) stat += '；整行：' + hit.line
+        if (hit.limited) stat += '；读取受限：跨域页面内容不可见（浏览器安全限制），窗口身份见上（' + (hit.src ? hit.src : '无URL') + '）'
+        if (hit.candidates.length > 0) stat += '；候选：' + hit.candidates.map((t, i) => '[' + (i + 1) + ']' + t).join(' ')
+      } else {
+        stat = '屏幕坐标 (' + Math.round(e.clientX) + ', ' + Math.round(e.clientY) + ')'
+        if (paneEl) {
+          const r = paneEl.getBoundingClientRect()
+          const rx = (((e.clientX - r.left) / Math.max(1, r.width)) * 100).toFixed(1)
+          const ry = (((e.clientY - r.top) / Math.max(1, r.height)) * 100).toFixed(1)
+          stat += '，窗口内 (' + rx + '%, ' + ry + '%)'
+        }
+        const ctx = ctxOf(e.target)
+        if (ctx) stat += '，元素 ' + ctx
+      }
+      document.body.classList.remove('dsh-wt-annotating')
+      const ex = Math.max(8, Math.min(e.clientX + 10, window.innerWidth - 288))
+      const ey = Math.max(8, Math.min(e.clientY + 14, window.innerHeight - 148))
+      setAnnot({ started: true, drawing: false, ex, ey, stat })
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelAnnot() }
+    window.addEventListener('mousemove', onMove, true)
+    window.addEventListener('mousedown', onDown, true)
+    window.addEventListener('mouseup', onUp, true)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('mousemove', onMove, true)
+      window.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('mouseup', onUp, true)
+      window.removeEventListener('keydown', onKey, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.on, s.started])
+  // 首次进入标注：右侧气泡提示「拖动也可框选」，仅显示一次
+  const [hintOnce] = useState<boolean>(() => { try { return localStorage.getItem('dsh.worktable.annotHint.v1') !== '1' } catch { return false } })
+  const [hintVisible, setHintVisible] = useState(false)
+  useEffect(() => {
+    if (!s.on || !hintOnce) return
+    setHintVisible(true)
+    try { localStorage.setItem('dsh.worktable.annotHint.v1', '1') } catch {}
+    const t = window.setTimeout(() => setHintVisible(false), 4200)
+    return () => window.clearTimeout(t)
+  }, [s.on, hintOnce])
+  if (!s.on) return null
+  {hintVisible && (
+    <div className="dsh-wt_annotUi dsh-wt_annotHint">{T('annot.hint')}</div>
+  )}
+  if (s.drawing) {
+    const L = Math.min(s.bx0, s.bx1)
+    const T = Math.min(s.by0, s.by1)
+    const R = Math.max(s.bx0, s.bx1)
+    const B = Math.max(s.by0, s.by1)
+    return <div className="dsh-wt_annotUi dsh-wt_annotSel" style={{ left: L, top: T, width: R - L, height: B - T }} />
+  }
+  if (!s.started) {
+    return (
+      <div className="dsh-wt_annotUi dsh-wt_annotBubble" style={{ left: s.px, top: s.py }} aria-hidden>
+        <svg width="12" height="12" viewBox="0 0 16 16"><path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+      </div>
+    )
+  }
+  return (
+    <div className="dsh-wt_annotUi dsh-wt_annotEditor" style={{ left: s.ex, top: s.ey }}>
+      <textarea
+        className="dsh-wt_annotInput"
+        autoFocus
+        value={s.draft}
+        placeholder={T('annot.placeholder')}
+        onChange={(e) => setAnnot({ draft: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmAnnot() }
+          if (e.key === 'Escape') cancelAnnot()
+        }}
+      />
+      <div className="dsh-wt_annotBtns">
+        <button type="button" className="dsh-wt_annotOk" title={T('annot.ok')} aria-label={T('annot.ok')} onClick={confirmAnnot}>✓</button>
+        <button type="button" className="dsh-wt_annotNo" title={T('annot.cancel')} aria-label={T('annot.cancel')} onClick={cancelAnnot}>✕</button>
+      </div>
+    </div>
+  )
+}
+
+/** 找到会话根容器：data-phase 元素中排除输入框、取含子元素者。
+ * DSH 0.1.1-rc.2 与 0.1.2-rc.1 的会话阶段一致：active（有消息）/ hero（无会话或空会话）/ settling（过渡）。
+ * 优先 active，其次 hero（空会话/无会话时也能打开分栏），settling 兜底（锚定后由观察器修正）。 */
 function findConversationRoot(): HTMLElement | null {
   const candidates = Array.from(document.querySelectorAll<HTMLElement>('[data-phase]'))
-  const ok = (el: HTMLElement) => el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT' && el.children.length >= 2
-  return candidates.find((el) => ok(el) && el.dataset.phase === 'active')
-    ?? candidates.find(ok)
-    ?? null
+  const ok = (el: HTMLElement) => el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT'
+    && el.children.length >= 1 && !/input/i.test(String(el.className))
+  const rank = (el: HTMLElement) => (el.dataset.phase === 'active' ? 0 : el.dataset.phase === 'hero' ? 1 : 2)
+  let best: HTMLElement | null = null
+  let bestRank = Infinity
+  for (const el of candidates) {
+    if (!ok(el)) continue
+    const r = rank(el)
+    if (r < bestRank) { bestRank = r; best = el }
+  }
+  return best
+}
+
+/** 从首个槽位元素里解析「可见头部」：
+ * - 0.1.1：children[0] 就是 <header> 本身（可见时自身有高度）。
+ * - 0.1.2：children[0] 是零高的槽位包装（display:contents 式），真实头部渲染在其内部——
+ *   此时向内找第一个可见后代（文档序 = 头部自身，先于其子元素）。
+ * - 空会话（headerHidden，整棵子树 display:none）：找不到任何可见元素 → null（顶部 = 根顶部）。 */
+function visibleHeaderIn(first: HTMLElement): HTMLElement | null {
+  if (first.getBoundingClientRect().height > 0) return first
+  for (const el of Array.from(first.querySelectorAll<HTMLElement>('*'))) {
+    const r = el.getBoundingClientRect()
+    if (r.height > 0 && r.width > 0) return el
+  }
+  return null
+}
+
+/** 从会话根解析分栏锚点（兼容 0.1.1 与 0.1.2 两种 DOM 结构）：
+ * - 0.1.1 与 0.1.2 会话打开：root.children = [头部(或头部包装), 内容滚动区]（0.1.2 多一层 body 包装，不影响取 children[1]）。
+ * - 0.1.2 无会话：root.children = [body]（无头部元素）。
+ * - 空会话（blank）：头部带 headerHidden 样式（高度为 0），按「无头部」处理（顶部 = 根顶部）。
+ * header 仅当存在第二个子元素且能解析出可见头部时生效；viewArea = 第二个子元素，只有一个时 = 第一个。 */
+function resolveAnchor(root: HTMLElement): { header: HTMLElement | null; viewArea: HTMLElement } {
+  const first = root.children[0] as HTMLElement | undefined
+  const second = root.children[1] as HTMLElement | undefined
+  const header = !!second && !!first ? visibleHeaderIn(first) : null
+  return { header, viewArea: second ?? first! }
 }
 
 function loadSaved(layoutId: string): { chatW: number; topH: number; leftW: number; paneWs: number[]; topWs: number[]; leftWs: number[]; chatHidden?: boolean } | null {
@@ -359,6 +815,7 @@ export const splitStore: SplitState = {
   savedMarginLeft: '',
   savedMarginRight: '',
   savedMarginTop: '',
+  savedWidthVar: '',
   observer: null,
   fallback: null,
   yieldObserver: null,
@@ -393,9 +850,7 @@ export const splitStore: SplitState = {
     } catch {}
     const root = findConversationRoot()
     if (!root) return false
-    const header = root.children[0] as HTMLElement | undefined
-    const viewArea = root.children[1] as HTMLElement | undefined
-    if (!header || !viewArea) return false
+    const { header, viewArea } = resolveAnchor(root)
     this.spec = { ...spec, chatSide: spec.chatSide === 'left' ? 'left' : 'right' }
     // 向后兼容归一化：单内容声明 → 一个标签页
     const normalize = (p: SplitPane): SplitPane => {
@@ -428,10 +883,17 @@ export const splitStore: SplitState = {
     this.root = root
     this.header = header
     this.viewArea = viewArea
+    this.savedWidthVar = root.style.getPropertyValue('--dsh-chat-user-width')
     this.savedMarginLeft = viewArea.style.marginLeft
     this.savedMarginRight = viewArea.style.marginRight
     this.savedMarginTop = viewArea.style.marginTop
     this.refreshGeom()
+    // 存档 sanitize：chatW 等尺寸按本布局规格钳制（防老版本/脏存值越界，如 1067 > max 600）
+    if (this.geom) {
+      const minContent = main.reduce((a: number, p: SplitPane) => a + p.min, 0) + Math.max(0, main.length - 1) * GAP
+      const hi = Math.max(spec.chatWidth.min, (this.geom.right - this.geom.left) - minContent)
+      this.chatW = clamp(Math.round(this.chatW), spec.chatWidth.min, hi)
+    }
     // 均衡默认：无存档尺寸时按当前可用空间比例分配，
     // 不再出现“其余窗全部贴 min、最后一个吃掉全部余量”的悬殊观感。
     const g0 = this.geom
@@ -453,7 +915,7 @@ export const splitStore: SplitState = {
       }
       if (!hasPaneWs) {
         const contentW = Math.max(0, colW0 - (this.chatHidden ? 0 : this.chatW))
-        const avail = Math.max(main.length * 120, contentW - Math.max(0, main.length - 1) * DIVIDER)
+        const avail = Math.max(main.length * 120, contentW - Math.max(0, main.length - 1) * GAP)
         const share = Math.round(avail / main.length)
         this.paneWs = main.map((p) => Math.max(p.min, share))
       }
@@ -461,7 +923,7 @@ export const splitStore: SplitState = {
         // chatFull 时顶行只占内容侧（扣除聊天列宽；隐藏时聊天列不占宽）
         const chatW0 = spec.chatFullHeight === true && !this.chatHidden ? this.chatW : 0
         const rowW = Math.max(0, colW0 - chatW0 - (left ? this.leftW : 0))
-        const avail = Math.max(top.length * 120, rowW - Math.max(0, top.length - 1) * DIVIDER)
+        const avail = Math.max(top.length * 120, rowW - Math.max(0, top.length - 1) * GAP)
         const share = Math.round(avail / top.length)
         this.topWs = top.map((p) => Math.max(p.min, share))
       }
@@ -470,20 +932,21 @@ export const splitStore: SplitState = {
     this.applyMargin()
     this.observer = new ResizeObserver(() => {
       const r = this.root
-      if (!(r && r.isConnected && (r.dataset.phase === 'active' || r.dataset.phase === 'hero' || r.dataset.phase === 'settling'))) {
-        this.syncAnchor()
-        return
-      }
+      if (!(r && r.isConnected)) { this.syncAnchor(); return }
+      const anchor = resolveAnchor(r)
+      if (anchor.header !== this.header || anchor.viewArea !== this.viewArea) { this.syncAnchor(); return }
       this.refreshGeom()
       this.applyMargin()
       this.notify()
     })
     this.observer.observe(root)
-    // 兜底：会话根被替换/phase 变化时 RO 可能不再回调，用 body 级 MutationObserver 驱动重锚定
+    // 兜底：会话根被替换/子结构变化（如 hero→active 头部出现）时 RO 可能不再回调，
+    // 用 body 级 MutationObserver 驱动重锚定；锚点未变时静默（避免流式消息期间高频刷新）
     this.fallback = new MutationObserver(() => {
       const r = this.root
-      if (r && r.isConnected && (r.dataset.phase === 'active' || r.dataset.phase === 'hero' || r.dataset.phase === 'settling')) return
-      this.syncAnchor()
+      if (!(r && r.isConnected)) { this.syncAnchor(); return }
+      const anchor = resolveAnchor(r)
+      if (anchor.header !== this.header || anchor.viewArea !== this.viewArea) this.syncAnchor()
     })
     this.fallback.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-phase'] })
     // 让位观察器：会话视图区 margin 被外部改写时处理。
@@ -522,13 +985,7 @@ export const splitStore: SplitState = {
     return true
   },
 
-  /** 会话根失效（切换会话）时重新锚定：左侧内容保持不关闭；无会话才关闭。
-   * 会话切换存在 DOM 过渡期（旧根已卸载、新根未挂载，瞬时找不到可用根）——
-   * 此时立即 close 会造成「打开即闪退」。进入宽限期轮询（120ms×最多 2.4s），
-   * 等新根挂载后正常重锚定；宽限期满仍无根才真正关闭。
-   * phase=hero（空白新会话的欢迎态）与 settling（切换过渡态）都是合法状态：
-   * 根结构完整（header + scrollBody），直接锚定——否则新建空白会话会被误判为
-   * 锚定失败，2.4s 宽限一到就把整个分栏关掉（「新建会话把工作台挤下去」的根因）。 */
+  /** 会话根失效（切换会话 / hero↔active 结构变化）时重新锚定：左侧内容保持不关闭；无会话根才关闭 */
   syncAnchor() {
     if (!this.active) return
     const next = findConversationRoot()
@@ -541,7 +998,11 @@ export const splitStore: SplitState = {
       this.scheduleAnchorRetry()
       return
     }
-    if (next === this.root) {
+    const ph = next.dataset.phase
+    if (ph !== 'active' && ph !== 'hero') return // settling 等过渡态：保持等待（phase 变化会再次触发）
+    const anchor = resolveAnchor(next)
+    if (next === this.root && anchor.header === this.header && anchor.viewArea === this.viewArea) {
+      // 同锚点：头部可能由隐藏变可见（hero→active），刷新几何与挤位
       this.refreshGeom()
       this.applyMargin()
       this.anchorRetryStart = 0
@@ -549,24 +1010,32 @@ export const splitStore: SplitState = {
       this.notify()
       return
     }
-    const header = next.children[0] as HTMLElement | undefined
-    const viewArea = next.children[1] as HTMLElement | undefined
-    if (!header || !viewArea) {
-      this.scheduleAnchorRetry()
-      return
+    const viewArea = anchor.viewArea
+    const oldRoot = this.root
+    const oldViewArea = this.viewArea
+    // 恢复旧锚点（若仍连接），锚定到新会话根
+    if (oldViewArea && oldViewArea.isConnected && oldViewArea !== viewArea) {
+      oldViewArea.style.marginLeft = this.savedMarginLeft
+      oldViewArea.style.marginRight = this.savedMarginRight
+      oldViewArea.style.marginTop = this.savedMarginTop
     }
-    // 恢复旧视图区 margin（若仍连接），锚定到新会话根
-    if (this.viewArea && this.viewArea.isConnected && this.viewArea !== viewArea) {
-      this.viewArea.style.marginLeft = this.savedMarginLeft
-      this.viewArea.style.marginRight = this.savedMarginRight
-      this.viewArea.style.marginTop = this.savedMarginTop
+    if (oldRoot && oldRoot.isConnected && oldRoot !== next) {
+      if (this.savedWidthVar) oldRoot.style.setProperty('--dsh-chat-user-width', this.savedWidthVar)
+      else oldRoot.style.removeProperty('--dsh-chat-user-width')
     }
     this.root = next
-    this.header = header
+    this.header = anchor.header
     this.viewArea = viewArea
-    this.savedMarginLeft = viewArea.style.marginLeft
-    this.savedMarginRight = viewArea.style.marginRight
-    this.savedMarginTop = viewArea.style.marginTop
+    // 仅锚点元素真正更换时才记录「打开前」原值——同元素重锚（hero→active 头部出现）
+    // 必须保留最初存档，否则关闭时会把已应用的 margin/变量误还原成「新原值」
+    if (oldRoot !== next) {
+      this.savedWidthVar = next.style.getPropertyValue('--dsh-chat-user-width')
+    }
+    if (oldViewArea !== viewArea) {
+      this.savedMarginLeft = viewArea.style.marginLeft
+      this.savedMarginRight = viewArea.style.marginRight
+      this.savedMarginTop = viewArea.style.marginTop
+    }
     this.observer?.disconnect()
     this.observer.observe(next)
     this.refreshGeom()
@@ -600,11 +1069,12 @@ export const splitStore: SplitState = {
 
   refreshGeom() {
     const root = this.root
-    const header = this.header
-    if (!root || !header) return
+    if (!root) return
     const rr = root.getBoundingClientRect()
-    const hr = header.getBoundingClientRect()
-    this.geom = { left: rr.left, top: hr.bottom, right: rr.right, bottom: rr.bottom }
+    const hr = this.header ? this.header.getBoundingClientRect() : null
+    // 头部隐藏（blank 会话）或无头部（0.1.2 无会话）时以根顶部为分栏上沿
+    const top = hr && hr.height > 0 ? hr.bottom : rr.top
+    this.geom = { left: rr.left, top, right: rr.right, bottom: rr.bottom }
   },
 
   applyMargin() {
@@ -617,6 +1087,11 @@ export const splitStore: SplitState = {
     const hasLeft = !!spec.left
     const hasTop = !!(spec.top && spec.top.length > 0)
     const chatW = clamp(this.chatW, spec.chatWidth.min, Math.max(spec.chatWidth.min, colW - 60))
+    // 会话内容宽 clamp(680px, …, 920px) 不随挤出的聊天列收缩 → 显式钉到挤出的列宽
+    // （close/重锚定时原样恢复；0.1.1 上该 CSS 变量闲置，设置无害）
+    if (this.root && this.root.isConnected) {
+      this.root.style.setProperty('--dsh-chat-user-width', Math.round(chatW) + 'px')
+    }
     const topH = hasTop
       ? clamp(this.topH, spec.topHeight?.min ?? 80, Math.max(spec.topHeight?.min ?? 80, rowH - BAR_H - 80))
       : 0
@@ -644,7 +1119,7 @@ export const splitStore: SplitState = {
     if (this.chatHidden) return
     const colW = g.right - g.left
     const main = spec.main ?? []
-    const minContent = main.reduce((a, p) => a + p.min, 0) + Math.max(0, main.length - 1) * DIVIDER
+    const minContent = main.reduce((a, p) => a + p.min, 0) + Math.max(0, main.length - 1) * GAP
     const hi = Math.max(spec.chatWidth.min, colW - minContent)
     this.chatW = clamp(Math.round(w), spec.chatWidth.min, hi)
     this.applyMargin()
@@ -700,7 +1175,7 @@ export const splitStore: SplitState = {
     const contentW = Math.max(0, colW - chatW)
     const othersMin = main.reduce((a, p, k) => a + (k === i ? 0 : p.min), 0)
     const lo = main[i].min
-    const hi = Math.max(lo, contentW - othersMin - Math.max(0, main.length - 1) * DIVIDER)
+    const hi = Math.max(lo, contentW - othersMin - Math.max(0, main.length - 1) * GAP)
     const next = this.paneWs.slice()
     next[i] = clamp(Math.round(w), lo, hi)
     this.paneWs = next
@@ -717,7 +1192,7 @@ export const splitStore: SplitState = {
     const colW = g.right - g.left
     const othersMin = top.reduce((a, p, k) => a + (k === i ? 0 : p.min), 0)
     const lo = top[i].min
-    const hi = Math.max(lo, colW - othersMin - Math.max(0, top.length - 1) * DIVIDER)
+    const hi = Math.max(lo, colW - othersMin - Math.max(0, top.length - 1) * GAP)
     const next = this.topWs.slice()
     next[i] = clamp(Math.round(w), lo, hi)
     this.topWs = next
@@ -732,20 +1207,66 @@ export const splitStore: SplitState = {
   setPaneMinimized(row, i, minimized) {
     const spec = this.spec
     if (!spec) return
-    const mutate = (pane: SplitPane): SplitPane => ({ ...pane, minimized })
-    if (row === 'left') {
-      if (!spec.left || i !== 0) return
-      this.spec = { ...spec, left: mutate(spec.left) }
-    } else if (row === 'top') {
-      const top = [...(spec.top ?? [])]
-      if (!top[i]) return
-      top[i] = mutate(top[i])
-      this.spec = { ...spec, top }
+    const pick = (arr: SplitPane[], idx: number) => arr[idx]
+    const target = row === 'left' ? spec.left : row === 'top' ? pick(spec.top ?? [], i) : pick(spec.main ?? [], i)
+    if (!target) return
+    // 三种级联（都不触碰 margin → agent 对话窗永远原位原宽，绝不被遮挡）：
+    // ① 最小化「处于最大化」的窗 → 全部窗一起进恢复区（用户点「窗口N」页签恢复）
+    // ② 从恢复区还原某窗 → 只还原它，并清掉全部最大化标记（回到普通布局）
+    // ③ 普通最小化 → 仅该窗进恢复区
+    const allOff = (p: SplitPane): SplitPane => ({ ...p, minimized: true, maximized: undefined })
+    const unmin = (p: SplitPane): SplitPane => ({ ...p, minimized: false, maximized: undefined })
+    const clearMax = (p: SplitPane): SplitPane => ({ ...p, maximized: undefined })
+    const left = spec.left ? [spec.left] : []
+    const top = [...(spec.top ?? [])]
+    const main = [...spec.main]
+    if (minimized && target.maximized) {
+      this.spec = { ...spec, left: spec.left ? allOff(spec.left) : null, top: top.map(allOff), main: main.map(allOff) }
+    } else if (!minimized) {
+      const hit = (r: PaneRow, j: number) => r === row && j === i
+      this.spec = {
+        ...spec,
+        left: left.map((p, j) => (hit('left', j) ? unmin(p) : clearMax(p)))[0] ?? null,
+        top: top.map((p, j) => (hit('top', j) ? unmin(p) : clearMax(p))),
+        main: main.map((p, j) => (hit('main', j) ? unmin(p) : clearMax(p))),
+      }
     } else {
-      const main = [...spec.main]
-      if (!main[i]) return
-      main[i] = mutate(main[i])
-      this.spec = { ...spec, main }
+      const mutate = (pane: SplitPane): SplitPane => ({ ...pane, minimized })
+      if (row === 'left') {
+        if (!spec.left || i !== 0) return
+        this.spec = { ...spec, left: mutate(spec.left) }
+      } else if (row === 'top') {
+        if (!top[i]) return
+        top[i] = mutate(top[i])
+        this.spec = { ...spec, top }
+      } else {
+        if (!main[i]) return
+        main[i] = mutate(main[i])
+        this.spec = { ...spec, main }
+      }
+    }
+    this.onSpecMutated?.(this.spec)
+    this.persist()
+    this.notify()
+  },
+
+  setPaneMaximized(row, i, maximized) {
+    const spec = this.spec
+    if (!spec) return
+    if (row === 'left' && !spec.left) return
+    // 最大化 = 本窗保持打开，其余窗全部最小化让位（复用最小化机制：几何不触碰对话窗 margin）
+    // 还原（❐）= 全部窗一起回到普通布局
+    const maxed = (p: SplitPane): SplitPane => ({ ...p, maximized: true, minimized: false })
+    const yieldOff = (p: SplitPane): SplitPane => ({ ...p, minimized: true, maximized: undefined })
+    const norm = (p: SplitPane): SplitPane => ({ ...p, minimized: false, maximized: undefined })
+    const hit = (r: PaneRow, j: number) => r === row && j === i
+    const mapPane = (p: SplitPane, r: PaneRow, j: number): SplitPane => (maximized ? (hit(r, j) ? maxed(p) : yieldOff(p)) : norm(p))
+    const left = spec.left ? [spec.left] : []
+    this.spec = {
+      ...spec,
+      left: left.map((p, j) => mapPane(p, 'left', j))[0] ?? null,
+      top: (spec.top ?? []).map((p, j) => mapPane(p, 'top', j)),
+      main: (spec.main ?? []).map((p, j) => mapPane(p, 'main', j)),
     }
     this.onSpecMutated?.(this.spec)
     this.persist()
@@ -961,6 +1482,10 @@ export const splitStore: SplitState = {
   },
 
   close() {
+    if (this.root && this.root.isConnected) {
+      if (this.savedWidthVar) this.root.style.setProperty('--dsh-chat-user-width', this.savedWidthVar)
+      else this.root.style.removeProperty('--dsh-chat-user-width')
+    }
     if (this.viewArea) {
       this.viewArea.style.marginLeft = this.savedMarginLeft
       this.viewArea.style.marginRight = this.savedMarginRight
@@ -979,6 +1504,7 @@ export const splitStore: SplitState = {
     this.root = null
     this.header = null
     this.viewArea = null
+    this.savedWidthVar = ''
     this.geom = null
     this.spec = null
     this.active = false
@@ -1012,7 +1538,7 @@ function allocate(panes: SplitPane[], ws: number[], total: number) {
   // 权值 = 未最小化窗的窗口宽；最小化窗被剔除
   const activeIdx = panes.map((p, i) => (p.minimized ? -1 : i)).filter((i) => i >= 0)
   const active = activeIdx.length
-  const gapTotal = Math.max(0, active - 1) * DIVIDER
+  const gapTotal = Math.max(0, active - 1) * GAP
   const avail = Math.max(0, total - gapTotal)
   // 按未最小化窗的总宽比例分配 avail；最后一个 active 拿余量
   const wsActive = activeIdx.map((i) => Math.max(0, ws[i]))
@@ -1039,7 +1565,7 @@ function allocate(panes: SplitPane[], ws: number[], total: number) {
     }
     out.push({ pane: p, left: x, width: w, gone: false })
     used += w
-    x += w + DIVIDER
+    x += w + GAP
     activeLeft++
   })
   return out
@@ -1061,10 +1587,10 @@ function makeDividerHandler(kind: 'left' | 'chat' | 'top' | 'pane' | 'topPane', 
       } else if (kind === 'top') {
         splitStore.setTopH(ev.clientY - g.top - BAR_H)
       } else if (kind === 'pane' && index != null) {
-        const prefix = splitStore.paneWs.slice(0, index).reduce((a, b) => a + b, 0) + index * DIVIDER
+        const prefix = splitStore.paneWs.slice(0, index).reduce((a, b) => a + b, 0) + index * GAP
         splitStore.setPaneW(index, ev.clientX - (g.left + prefix))
       } else if (kind === 'topPane' && index != null) {
-        const prefix = splitStore.topWs.slice(0, index).reduce((a, b) => a + b, 0) + index * DIVIDER
+        const prefix = splitStore.topWs.slice(0, index).reduce((a, b) => a + b, 0) + index * GAP
         splitStore.setTopW(index, ev.clientX - (g.left + prefix))
       }
     }
@@ -1206,9 +1732,9 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
         />
         {/* 登录墙逃生口：需要 SSO/扫码登录的站点（豆包等）在代理源下会话无效，一键去系统浏览器（真实 Cookie） */}
         <button type="button" className="dsh-wt_browserGo" title="在系统浏览器打开（需登录的站点请用这里）" aria-label="在系统浏览器打开" onClick={() => { if (/^https?:\/\//i.test(url.trim())) window.open(url.trim(), '_blank', 'noopener') }}>⇱</button>
+        {props.barActions?.onAnnot && <button type="button" className="dsh-wt_browserGo dsh-wt_annotGo" title={T('annot.label')} aria-label={T('annot.label')} onClick={props.barActions.onAnnot}><AnnotGlyph /></button>}
         {props.barActions?.onRefresh && <button type="button" className="dsh-wt_browserGo" title={T('pane.refresh')} aria-label={T('pane.refresh')} onClick={props.barActions.onRefresh}>↻</button>}
         {props.barActions?.onClose && <button type="button" className="dsh-wt_browserGo" title={T('pane.closeTab')} aria-label={T('pane.closeTab')} onClick={props.barActions.onClose}>✕</button>}
-        {props.barActions?.onMinimize && <button type="button" className="dsh-wt_browserGo" title={T('split.minimize')} aria-label={T('split.minimize')} onClick={props.barActions.onMinimize}>─</button>}
       </div>
       {embed.src === null
         ? <div className="dsh-wt_paneFrame" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 12 }}>载入中…</div>
@@ -1278,11 +1804,143 @@ function AnimPane(props: { row: PaneRow; index: number; tabId: string; content: 
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') go() }}
         />
+        {props.barActions?.onAnnot && <button type="button" className="dsh-wt_browserGo dsh-wt_annotGo" title={T('annot.label')} aria-label={T('annot.label')} onClick={props.barActions.onAnnot}><AnnotGlyph /></button>}
         {props.barActions?.onRefresh && <button type="button" className="dsh-wt_browserGo" title={T('pane.refresh')} aria-label={T('pane.refresh')} onClick={props.barActions.onRefresh}>↻</button>}
         {props.barActions?.onClose && <button type="button" className="dsh-wt_browserGo" title={T('pane.closeTab')} aria-label={T('pane.closeTab')} onClick={props.barActions.onClose}>✕</button>}
-        {props.barActions?.onMinimize && <button type="button" className="dsh-wt_browserGo" title={T('split.minimize')} aria-label={T('split.minimize')} onClick={props.barActions.onMinimize}>─</button>}
       </div>
       <iframe ref={iframeRef} key={props.reloadKey} className="dsh-wt_paneFrame" src={src} title="anim" />
+    </>
+  )
+}
+
+/** 主题图标（描边风格）：dark=月 / light=日 / system=电脑；主按钮与下拉共用 */
+function ThemeIcon({ mode, size }: { mode: 'dark' | 'light' | 'system'; size?: number }) {
+  const s = size ?? 18
+  if (mode === 'dark') return <svg width={s} height={s} viewBox="0 0 16 16" aria-hidden><path d="M14 8.53A6 6 0 1 1 7.47 2 4.67 4.67 0 0 0 14 8.53z" fill="none" stroke="currentColor" strokeWidth="0.9" strokeLinejoin="round" /></svg>
+  if (mode === 'light') return <svg width={s} height={s} viewBox="0 0 16 16" aria-hidden><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" strokeWidth="0.9" /><path d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2" fill="none" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" /></svg>
+  return <svg width={s} height={s} viewBox="0 0 16 16" aria-hidden><rect x="2" y="3.2" width="12" height="8.8" rx="1.6" fill="none" stroke="currentColor" strokeWidth="0.9" /><path d="M5.4 14.4h5.2M8 12v2.4" fill="none" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" /></svg>
+}
+
+/** 两行滑杆图标（设置入口）：2 条轨道 + 2 个旋钮，描边风格 */
+function SliderIcon({ size }: { size?: number }) {
+  const s = size ?? 14
+  return (
+    <svg width={s} height={s} viewBox="0 0 16 16" aria-hidden>
+      <path d="M2.5 5.6h11M2.5 10.4h11" fill="none" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="10.4" cy="5.6" r="1.8" fill="currentColor" />
+      <circle cx="5.8" cy="10.4" r="1.8" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** HSL 数值普通输入框：始终为常规边框输入框，输入提交时自动钳制到 0..max */
+function HslValInput(props: { value: number; max: number; min?: number; onCommit: (n: number) => void }) {
+  const lo = props.min ?? 0
+  const [draft, setDraft] = useState(String(props.value))
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(String(props.value)) }, [props.value, focused])
+  const commit = () => {
+    let n = parseInt(draft, 10)
+    if (!Number.isFinite(n)) n = props.value
+    n = Math.min(Math.max(n, lo), props.max)
+    props.onCommit(n)
+  }
+  return (
+    <input
+      className="dsh-wt_hslInput"
+      type="number"
+      min={lo}
+      max={props.max}
+      value={focused ? draft : String(props.value)}
+      onFocus={() => { setFocused(true); setDraft(String(props.value)) }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setFocused(false); commit() }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') { setDraft(String(props.value)); (e.target as HTMLInputElement).blur() }
+      }}
+    />
+  )
+}
+
+/** 纯色背景默认值（与主题关联）：深色 = 原深蓝黑 #0a0d13；浅色 = 白 #eef1f5；网格线由 --wt-grid 主题变量自动切换 */
+const PLAIN_HSL_DARK = { h: -140, s: 31, l: 6 }
+const PLAIN_HSL_LIGHT = { h: -146, s: 26, l: 95 }
+
+/** 循环视频背景：首尾帧交叉渐变——双轨重叠过渡（尾帧淡出→头帧淡入），消除循环「卡一下」。
+ *  两轨共用同一源；备用轨仅在交接窗口播放，其余时间暂停（解码负担仅 ~1.2s/循环）。 */
+function ConsoleVideo(props: { src: string; style?: CSSProperties }) {
+  const aRef = useRef<HTMLVideoElement | null>(null)
+  const bRef = useRef<HTMLVideoElement | null>(null)
+  const roleRef = useRef<'a' | 'b'>('a')
+  const firedRef = useRef(false)
+  useEffect(() => {
+    const role = () => (roleRef.current === 'a' ? aRef.current : bRef.current)
+    const spare = () => (roleRef.current === 'a' ? bRef.current : aRef.current)
+    firedRef.current = false
+    let raf = 0
+    let stopped = false
+    const onEnded = () => {
+      const m = role()
+      const s = spare()
+      if (!m || !s) return
+      // 主轨播完：备用轨已成为新主轨（淡入完成）；旧主轨复位为备用轨
+      roleRef.current = roleRef.current === 'a' ? 'b' : 'a'
+      firedRef.current = false
+      try {
+        m.currentTime = 0
+        m.pause()
+        m.style.opacity = '0'
+        m.getAnimations().forEach((an) => an.cancel())
+      } catch {}
+      try {
+        const nm = role()
+        if (nm) nm.style.opacity = '1'
+      } catch {}
+    }
+    const tick = () => {
+      if (stopped) return
+      const m = role()
+      const s = spare()
+      if (m && s && !m.paused && m.readyState >= 2 && !firedRef.current) {
+        const d = m.duration
+        if (Number.isFinite(d) && d > 0) {
+          const fade = Math.min(2.0, Math.max(1.2, d * 0.18))
+          if (m.currentTime >= Math.max(0, d - fade)) {
+            firedRef.current = true
+            try {
+              try { s.currentTime = 0 } catch {}
+              const startFade = () => {
+                try {
+                  try { m.getAnimations().forEach((an) => an.cancel()) } catch {}
+                  try { s.getAnimations().forEach((an) => an.cancel()) } catch {}
+                  s.play().catch(() => {})
+                  s.animate([{ opacity: 0 }, { opacity: 1 }], { duration: fade * 1000, easing: 'linear', fill: 'forwards' })
+                  m.animate([{ opacity: 1 }, { opacity: 0 }], { duration: fade * 1000, easing: 'linear', fill: 'forwards' })
+                } catch {}
+              }
+              if (s.readyState >= 2) startFade()
+              else s.addEventListener('canplay', startFade, { once: true })
+            } catch {}
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    aRef.current?.addEventListener('ended', onEnded)
+    bRef.current?.addEventListener('ended', onEnded)
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      aRef.current?.removeEventListener('ended', onEnded)
+      bRef.current?.removeEventListener('ended', onEnded)
+    }
+  }, [])
+  return (
+    <>
+      <video ref={aRef} className="dsh-wt_consoleMedia" src={props.src} muted autoPlay playsInline style={props.style} />
+      <video ref={bRef} className="dsh-wt_consoleMedia" src={props.src} muted playsInline style={{ ...props.style, opacity: 0 }} />
     </>
   )
 }
@@ -1292,6 +1950,310 @@ function AnimPane(props: { row: PaneRow; index: number; tabId: string; content: 
 function ConsolePane() {
   const [, setTick] = useState(0)
   const [now, setNow] = useState(() => Date.now())
+  const [cols, setColsState] = useState<number>(() => splitEnv?.console?.getCols?.() ?? 3)
+  const [shape, setShapeState] = useState<'square' | 'circle'>(() => splitEnv?.console?.getShape?.() ?? 'square')
+  const [bg, setBgState] = useState<'plain' | 'glow' | 'photo'>(() => splitEnv?.console?.getBg?.() ?? 'glow')
+  const [bgPhoto, setBgPhoto] = useState<string>('')
+  const [photoId, setPhotoIdLocal] = useState<string>('')
+  const [photoList, setPhotoList] = useState<{ id: string; kind: 'photo' | 'video'; url: string }[]>([])
+  const [bgVideo, setBgVideo] = useState<string>('')
+  const [photoGrid, setPhotoGridState] = useState<boolean>(() => splitEnv?.console?.getPhotoGrid?.() ?? true)
+  const [gridOpacity, setGridOpacityState] = useState<number>(() => splitEnv?.console?.getGridOpacity?.() ?? 8)
+  const [cardBlur, setCardBlurState] = useState<number>(() => splitEnv?.console?.getCardBlur?.() ?? 8)
+  const [plainBlur, setPlainBlurState] = useState<number>(() => splitEnv?.console?.getPlainBlur?.() ?? 0)
+  const [glowBlur, setGlowBlurState] = useState<number>(() => splitEnv?.console?.getGlowBlur?.() ?? 8)
+  const [plainGrid, setPlainGridState] = useState<number>(() => splitEnv?.console?.getPlainGrid?.() ?? 5)
+  const [glowGrid, setGlowGridState] = useState<number>(() => splitEnv?.console?.getGlowGrid?.() ?? 8)
+  const [glowSpeed, setGlowSpeedState] = useState<number>(() => splitEnv?.console?.getGlowSpeed?.() ?? 50)
+  const [annOpen, setAnnOpen] = useState(false)
+  const [updStatus, setUpdStatus] = useState<UpdateStatus>(() => readCache().status)
+  const [updInfo, setUpdInfo] = useState<UpdateInfo | null>(() => readCache().info)
+  const [autoCheckOn, setAutoCheckOn] = useState<boolean>(() => getAutoCheck())
+  const updBusyRef = useRef(false)
+  const photoUrlRef = useRef<string>('')
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [bgEdit, setBgEdit] = useState<'plain' | 'glow' | 'photo' | null>(null)
+  const [plainHsl, setPlainHslState] = useState<{ h: number; s: number; l: number }>(() => {
+    const saved = splitEnv?.console?.getPlainHsl?.()
+    if (saved) return saved
+    return splitEnv?.console?.getTheme?.() === 'light' ? { ...PLAIN_HSL_LIGHT } : { ...PLAIN_HSL_DARK }
+  })
+  const [glowHsl, setGlowHslState] = useState<{ h: number; s: number; l: number }>(() => splitEnv?.console?.getGlowHsl?.() ?? { h: 0, s: 100, l: 100 })
+  const [photoHsl, setPhotoHslState] = useState<{ h: number; s: number; l: number }>({ h: 0, s: 100, l: 100 })
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const firstRectsRef = useRef<Map<string, { x: number; y: number }> | null>(null)
+  const onCols = (n: number) => {
+    const grid = gridRef.current
+    if (grid) {
+      const rects = new Map<string, { x: number; y: number }>()
+      grid.querySelectorAll('.dsh-wt_consoleCard').forEach((el) => {
+        const key = (el as HTMLElement).dataset.flip ?? ''
+        const r = el.getBoundingClientRect()
+        rects.set(key, { x: r.left, y: r.top })
+      })
+      firstRectsRef.current = rects
+    }
+    setColsState(n)
+    splitEnv?.console?.setCols?.(n)
+  }
+  const onShape = (s: 'square' | 'circle') => {
+    setShapeState(s)
+    splitEnv?.console?.setShape?.(s)
+  }
+  /** 选择本地图片文件并入库 */
+  const pickPhotoFile = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*,video/*'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (!file) return
+      onFilePhoto(file)
+    }
+    input.click()
+  }
+  /** 新增媒体（照片/视频）：原始 Blob 存 IndexedDB（零压缩），显示用对象 URL；自动设为当前 */
+  const onFilePhoto = async (file: Blob) => {
+    let id = ''
+    let url = ''
+    let kind: 'photo' | 'video' = file.type && file.type.indexOf('video/') === 0 ? 'video' : 'photo'
+    const rec = await (splitEnv?.console?.addPhoto?.(file) ?? Promise.resolve(null)).catch(() => null)
+    if (rec) { id = rec.id; url = rec.url; kind = rec.kind } else {
+      url = URL.createObjectURL(file)
+    }
+    photoUrlRef.current = url
+    setPhotoIdLocal(id)
+    if (id) setPhotoList((prev) => [{ id, kind, url }, ...prev])
+    if (kind === 'video') { setBgPhoto(''); setBgVideo(url) } else { setBgVideo(''); setBgPhoto(url) }
+    setBgState('photo')
+    splitEnv?.console?.setBg?.('photo')
+  }
+  /** 删除一条媒体：当前使用的那条被删 → 切到最新一条；删光 → 回到流光背景 */
+  const removePhotoById = async (p: { id: string; kind: 'photo' | 'video'; url: string }) => {
+    try { await splitEnv?.console?.removePhoto?.(p.id) } catch {}
+    try { URL.revokeObjectURL(p.url) } catch {}
+    const nextList = photoList.filter((x) => x.id !== p.id)
+    setPhotoList(nextList)
+    if (photoId === p.id) {
+      const next = nextList[0] ?? null
+      if (next) {
+        setPhotoIdLocal(next.id)
+        splitEnv?.console?.setPhotoId?.(next.id)
+        photoUrlRef.current = next.url
+        setBgVideo(next.kind === 'video' ? next.url : '')
+        setBgPhoto(next.kind === 'video' ? '' : next.url)
+        setBgState('photo')
+        splitEnv?.console?.setBg?.('photo')
+      } else {
+        setPhotoIdLocal('')
+        photoUrlRef.current = ''
+        setBgPhoto('')
+        setBgVideo('')
+        setBgState('glow')
+        splitEnv?.console?.setBg?.('glow')
+      }
+    }
+  }
+  const togglePhotoGrid = () => {
+    const next = !photoGrid
+    setPhotoGridState(next)
+    splitEnv?.console?.setPhotoGrid?.(next)
+  }
+  const onGridOpacity = (n: number) => {
+    const v = Math.min(Math.max(Math.round(n), 0), 30)
+    setGridOpacityState(v)
+    splitEnv?.console?.setGridOpacity?.(v)
+  }
+  const onCardBlur = (n: number) => {
+    const v = Math.min(Math.max(Math.round(n), 0), 20)
+    setCardBlurState(v)
+    splitEnv?.console?.setCardBlur?.(v)
+  }
+  const onModeBlur = (kind: 'plain' | 'glow' | 'photo', n: number) => {
+    const v = Math.min(Math.max(Math.round(n), 0), 20)
+    if (kind === 'plain') { setPlainBlurState(v); splitEnv?.console?.setPlainBlur?.(v) }
+    else if (kind === 'glow') { setGlowBlurState(v); splitEnv?.console?.setGlowBlur?.(v) }
+    else { setCardBlurState(v); splitEnv?.console?.setCardBlur?.(v) }
+  }
+  const onModeGrid = (kind: 'plain' | 'glow', n: number) => {
+    const v = Math.min(Math.max(Math.round(n), 0), 30)
+    if (kind === 'plain') { setPlainGridState(v); splitEnv?.console?.setPlainGrid?.(v) }
+    else { setGlowGridState(v); splitEnv?.console?.setGlowGrid?.(v) }
+  }
+  const onGlowSpeed = (n: number) => {
+    const v = Math.min(Math.max(Math.round(n), 0), 100)
+    setGlowSpeedState(v)
+    splitEnv?.console?.setGlowSpeed?.(v)
+  }
+  const runUpdateCheck = async (force: boolean) => {
+    if (updBusyRef.current) return
+    updBusyRef.current = true
+    setUpdStatus('checking')
+    try {
+      const r = await checkUpdate(force)
+      setUpdStatus(r.status)
+      setUpdInfo(r.info)
+    } finally {
+      updBusyRef.current = false
+    }
+  }
+  const [updCopied, setUpdCopied] = useState(false)
+  const onCopyUpgrade = async () => {
+    const ok = await copyTextSafe(UPGRADE_AI)
+    if (ok) { setUpdCopied(true); window.setTimeout(() => setUpdCopied(false), 2200) }
+  }
+  const onSkipVersion = () => {
+    if (updInfo) { setSkipVersion(updInfo.latest); setUpdInfo(null); setUpdStatus('uptodate') }
+  }
+  const onAutoCheckToggle = () => {
+    const next = !autoCheckOn
+    setAutoCheckOn(next)
+    storeAutoCheck(next)
+    if (next) void runUpdateCheck(false)
+  }
+  /** 抓手拖拽排序：按住抓手上下移动 → 行实时重排，松手持久化 */
+  const dragRowRef = useRef<string | null>(null)
+  const dragFlipRef = useRef<Map<string, { x: number; y: number }> | null>(null)
+  const lastTargetRef = useRef<number>(-1)
+  const [dragRowId, setDragRowId] = useState<string | null>(null)
+  // FLIP：落位提交后，其他行从旧位置平滑让位（260ms 缓出）
+  useLayoutEffect(() => {
+    const first = dragFlipRef.current
+    if (!first) return
+    dragFlipRef.current = null
+    document.querySelectorAll<HTMLElement>('.dsh-wt_photoRow').forEach((el) => {
+      const key = el.dataset.rid ?? ''
+      const f = first.get(key)
+      if (!f) return
+      const r = el.getBoundingClientRect()
+      const dx = f.x - r.left
+      const dy = f.y - r.top
+      if (dx || dy) el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.25,.6,.3,1)' })
+    })
+  }, [photoList])
+  const onHandleDown = (id: string, e: { button: number; preventDefault: () => void; stopPropagation: () => void }) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragRowRef.current = id
+    lastTargetRef.current = photoList.findIndex((x) => x.id === id)
+    setDragRowId(id)
+    const onMove = (ev: PointerEvent) => {
+      if (dragRowRef.current !== id) return
+      const rows = Array.from(document.querySelectorAll<HTMLElement>('.dsh-wt_photoRow'))
+      if (rows.length === 0) return
+      // 槽位制：按固定行高算最近槽位；边界 ±0.12 行高为死区，未决定性越过前不切换
+      const first = rows[0].getBoundingClientRect()
+      const h = first.height
+      const rel = (ev.clientY - first.top) / h
+      let t = Math.max(0, Math.min(rows.length - 1, Math.floor(rel + 0.5)))
+      const frac = rel - Math.floor(rel)
+      if (Math.abs(frac - 0.5) < 0.12) t = lastTargetRef.current
+      if (t === lastTargetRef.current) return
+      const from = photoList.findIndex((x) => x.id === id)
+      if (from < 0) return
+      const rects = new Map<string, { x: number; y: number }>()
+      rows.forEach((el) => { const k = el.dataset.rid ?? ''; const r = el.getBoundingClientRect(); rects.set(k, { x: r.left, y: r.top }) })
+      const next = [...photoList]
+      const moved = next.splice(from, 1)[0]
+      const to = Math.max(0, Math.min(t, next.length))
+      next.splice(to, 0, moved)
+      dragFlipRef.current = rects
+      setPhotoList(next)
+      lastTargetRef.current = t
+    }
+    const onUp = () => {
+      dragRowRef.current = null
+      setDragRowId(null)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      const ids = photoList.map((x) => x.id)
+      void splitEnv?.console?.reorderPhotos?.(ids).catch(() => {})
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  /** 在媒体库中选中某条 */
+  const selectPhoto = (p: { id: string; kind: 'photo' | 'video'; url: string }) => {
+    setPhotoIdLocal(p.id)
+    splitEnv?.console?.setPhotoId?.(p.id)
+    photoUrlRef.current = p.url
+    if (p.kind === 'video') { setBgPhoto(''); setBgVideo(p.url) } else { setBgVideo(''); setBgPhoto(p.url) }
+    setBgState('photo')
+    splitEnv?.console?.setBg?.('photo')
+  }
+  const onBg = (m: 'plain' | 'glow' | 'photo') => {
+    if (m === 'photo') {
+      // 直接切换到当前媒体；没有媒体时才进入二级菜单引导上传
+      if (photoList.length === 0) { setBgEdit('photo'); return }
+      setBgState('photo')
+      splitEnv?.console?.setBg?.('photo')
+      return
+    }
+    setBgState(m)
+    splitEnv?.console?.setBg?.(m)
+  }
+  const editHsl = (kind: 'plain' | 'glow' | 'photo', patch: Partial<{ h: number; s: number; l: number }>) => {
+    if (kind === 'plain') {
+      const next = { ...plainHsl, ...patch }
+      setPlainHslState(next)
+      splitEnv?.console?.setPlainHsl?.(next)
+    } else if (kind === 'glow') {
+      const next = { ...glowHsl, ...patch }
+      setGlowHslState(next)
+      splitEnv?.console?.setGlowHsl?.(next)
+    } else {
+      const next = { ...photoHsl, ...patch }
+      setPhotoHslState(next)
+      if (photoId) splitEnv?.console?.setPhotoHsl?.(photoId, next)
+    }
+  }
+  const resetHsl = (kind: 'plain' | 'glow' | 'photo') => {
+    // 恢复初始：连同贴片模糊(B)/网格不透明度(T)一起复位（纯色 B=0，流光/自定义 B=8）
+    const blurDef = kind === 'plain' ? 0 : 8
+    if (kind === 'plain') {
+      setPlainBlurState(blurDef); splitEnv?.console?.setPlainBlur?.(blurDef)
+      setPlainGridState(5); splitEnv?.console?.setPlainGrid?.(5)
+    } else if (kind === 'glow') {
+      setGlowBlurState(blurDef); splitEnv?.console?.setGlowBlur?.(blurDef)
+      setGlowGridState(8); splitEnv?.console?.setGlowGrid?.(8)
+      setGlowSpeedState(50); splitEnv?.console?.setGlowSpeed?.(50)
+    } else {
+      setCardBlurState(blurDef); splitEnv?.console?.setCardBlur?.(blurDef)
+      setGridOpacityState(8); splitEnv?.console?.setGridOpacity?.(8)
+    }
+    if (kind === 'plain') {
+      const def = resolvedTheme === 'light' ? { ...PLAIN_HSL_LIGHT } : { ...PLAIN_HSL_DARK }
+      setPlainHslState(def)
+      splitEnv?.console?.setPlainHsl?.(def)
+    } else if (kind === 'glow') {
+      setGlowHslState({ h: 0, s: 100, l: 100 })
+      splitEnv?.console?.setGlowHsl?.({ h: 0, s: 100, l: 100 })
+    } else {
+      setPhotoHslState({ h: 0, s: 100, l: 100 })
+      if (photoId) splitEnv?.console?.setPhotoHsl?.(photoId, { h: 0, s: 100, l: 100 })
+      // 照片网格线开关一并复位为默认「开」
+      setPhotoGridState(true); splitEnv?.console?.setPhotoGrid?.(true)
+    }
+  }
+  useLayoutEffect(() => {
+    const first = firstRectsRef.current
+    if (!first) return
+    const grid = gridRef.current
+    if (!grid) return
+    grid.querySelectorAll('.dsh-wt_consoleCard').forEach((el) => {
+      const key = (el as HTMLElement).dataset.flip ?? ''
+      const f = first.get(key)
+      if (!f) return
+      const r = el.getBoundingClientRect()
+      const dx = f.x - r.left
+      const dy = f.y - r.top
+      if (dx || dy) {
+        el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 450, easing: 'cubic-bezier(.22,.61,.36,1)' })
+      }
+    })
+    firstRectsRef.current = null
+  }, [cols])
   const [themeMode, setThemeMode] = useState<'dark' | 'light' | 'system'>(() => splitEnv?.console?.getTheme?.() ?? 'system')
   const [sysDark, setSysDark] = useState(() => {
     try { return window.matchMedia('(prefers-color-scheme: dark)').matches } catch { return true }
@@ -1317,6 +2279,31 @@ function ConsolePane() {
   useEffect(() => {
     splitEnv?.console?.refreshPreviews?.()
   }, [])
+  // 自动检查更新（节流一天；手动按钮始终 force）
+  useEffect(() => { if (getAutoCheck()) void runUpdateCheck(false) }, [])
+  // 背景照片库：IndexedDB 异步加载记录 → 对象 URL；无记录则空
+  useEffect(() => {
+    let alive = true
+    splitEnv?.console?.getPhotoLib?.().then((lib) => {
+      if (!alive) return
+      setPhotoList(lib.list)
+      const active = lib.list.find((p) => p.id === lib.activeId) ?? lib.list[0] ?? null
+      if (active) {
+        setPhotoIdLocal(active.id)
+        photoUrlRef.current = active.url
+        setBgVideo(active.kind === 'video' ? active.url : '')
+        setBgPhoto(active.kind === 'video' ? '' : active.url)
+      }
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  // 当前照片切换 → 载入该照片记住的 HSL 调节值
+  useEffect(() => {
+    if (!photoId) return
+    setPhotoHslState(splitEnv?.console?.getPhotoHsl?.(photoId) ?? { h: 0, s: 100, l: 100 })
+  }, [photoId])
+  // 面板卸载时释放对象 URL
+  useEffect(() => () => { if (photoUrlRef.current) { try { URL.revokeObjectURL(photoUrlRef.current) } catch {} } }, [])
   // 运行时长的分钟级刷新：每秒重渲染一次（仅控制室开着时存在）
   useEffect(() => {
     const iv = window.setInterval(() => setNow(Date.now()), 1000)
@@ -1335,6 +2322,22 @@ function ConsolePane() {
     return sysDark ? 'dark' : 'light'
   })()
   const setTheme = (th: 'dark' | 'light' | 'system') => { setThemeMode(th); env?.setTheme?.(th) }
+  // 主题联动：切换主题时，若纯色还是另一主题的默认值 → 自动跟随新主题默认；自定义过则保持
+  const prevPlainThemeRef = useRef<'dark' | 'light' | null>(null)
+  useEffect(() => {
+    const prev = prevPlainThemeRef.current
+    prevPlainThemeRef.current = resolvedTheme
+    if (!prev || prev === resolvedTheme) return
+    const isDarkDef = plainHsl.h === PLAIN_HSL_DARK.h && plainHsl.s === PLAIN_HSL_DARK.s && plainHsl.l === PLAIN_HSL_DARK.l
+    const isLightDef = plainHsl.h === PLAIN_HSL_LIGHT.h && plainHsl.s === PLAIN_HSL_LIGHT.s && plainHsl.l === PLAIN_HSL_LIGHT.l
+    const next = resolvedTheme === 'light' && isDarkDef ? { ...PLAIN_HSL_LIGHT }
+      : resolvedTheme === 'dark' && isLightDef ? { ...PLAIN_HSL_DARK } : null
+    if (next) {
+      setPlainHslState(next)
+      splitEnv?.console?.setPlainHsl?.(next)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme])
   const fmtDur = (ms: number) => {
     const s = Math.max(0, Math.floor(ms / 1000))
     const h = Math.floor(s / 3600)
@@ -1343,31 +2346,49 @@ function ConsolePane() {
     return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0') : m + ':' + String(ss).padStart(2, '0')
   }
   const statusLabel: Record<string, string> = { idle: T('console.idle'), busy: T('console.busy'), need: T('console.need'), done: T('console.done') }
-  const themeOpts: { mode: 'dark' | 'light' | 'system'; icon: string; key: string }[] = [
-    { mode: 'dark', icon: '🌙', key: 'console.themeDark' },
-    { mode: 'light', icon: '☀️', key: 'console.themeLight' },
-    { mode: 'system', icon: '🖥️', key: 'console.themeSystem' },
+  const themeOpts: { mode: 'dark' | 'light' | 'system'; key: string }[] = [
+    { mode: 'dark', key: 'console.themeDark' },
+    { mode: 'light', key: 'console.themeLight' },
+    { mode: 'system', key: 'console.themeSystem' },
   ]
   return (
-    <div className="dsh-wt_console" data-wt-theme={resolvedTheme}>
-      <div className="dsh-wt_consoleHead">
-        <div className="dsh-wt_consoleTheme" role="group" aria-label={T('console.themeLabel')}>
-          {themeOpts.map((o) => (
-            <button
-              key={o.mode}
-              type="button"
-              className={'dsh-wt_consoleThemeBtn' + (themeMode === o.mode ? ' dsh-wt_consoleThemeBtnOn' : '')}
-              title={T(o.key)}
-              aria-label={T(o.key)}
-              onClick={() => setTheme(o.mode)}
-            ><span aria-hidden>{o.icon}</span></button>
-          ))}
-        </div>
-      </div>
-      <div className="dsh-wt_consoleGrid">
+    <div className="dsh-wt_console" data-wt-theme={resolvedTheme} data-wt-shape={shape} data-wt-bg={bg} data-wt-grid={bg === 'photo' && !photoGrid ? 'off' : 'on'} style={{ ...(bg === 'plain' ? { ['--wt-bg' as any]: 'hsl(' + plainHsl.h + ', ' + plainHsl.s + '%, ' + plainHsl.l + '%)', ['--wt-gridPlain' as any]: 'rgba(255,255,255,' + (plainGrid / 100) + ')', ['--wt-gridPlainLight' as any]: 'rgba(27,31,36,' + (plainGrid / 100) + ')' } : {}), ...(bg === 'glow' ? { ['--wt-gridGlow' as any]: 'rgba(255,255,255,' + (glowGrid / 100) + ')', ['--wt-gridGlowLight' as any]: 'rgba(27,31,36,' + (glowGrid / 100) + ')', ['--wt-glowScale' as any]: glowSpeed === 0 ? '100000000' : String(50 / glowSpeed) } : {}), ...(bg === 'photo' ? { ['--wt-gridPhoto' as any]: 'rgba(255,255,255,' + (gridOpacity / 100) + ')' } : {}), ['--wt-cardBlur' as any]: (bg === 'plain' ? plainBlur : bg === 'glow' ? glowBlur : cardBlur) + 'px' }}>
+      <span className="dsh-wt_consoleBg" aria-hidden style={bg === 'glow' && (glowHsl.h !== 0 || glowHsl.s !== 100 || glowHsl.l !== 100) ? { filter: 'hue-rotate(' + glowHsl.h + 'deg) saturate(' + glowHsl.s + '%) brightness(' + glowHsl.l + '%)' } : undefined}>
+        {bg === 'photo' && (bgVideo
+          ? <ConsoleVideo src={bgVideo} style={photoHsl.h !== 0 || photoHsl.s !== 100 || photoHsl.l !== 100 ? { filter: 'hue-rotate(' + photoHsl.h + 'deg) saturate(' + photoHsl.s + '%) brightness(' + photoHsl.l + '%)' } : undefined} />
+          : bgPhoto ? <img className="dsh-wt_consoleMedia" src={bgPhoto} alt="" style={photoHsl.h !== 0 || photoHsl.s !== 100 || photoHsl.l !== 100 ? { filter: 'hue-rotate(' + photoHsl.h + 'deg) saturate(' + photoHsl.s + '%) brightness(' + photoHsl.l + '%)' } : undefined} /> : null)}
+        {bg === 'glow' && (<><i className="dsh-wt_blob dsh-wt_blob1" /><i className="dsh-wt_blob dsh-wt_blob2" /><i className="dsh-wt_blob dsh-wt_blob3" /><i className="dsh-wt_blob dsh-wt_blob4" /></>)}</span>
+      {openMenu !== null && <div className="dsh-wt_dropMask" onClick={() => setOpenMenu(null)} />}
+      <div className="dsh-wt_consoleScroll">
+        {annOpen ? (
+          <div className="dsh-wt_announceCtr">
+          <div className="dsh-wt_announce">
+            <div className="dsh-wt_announceHead">
+              <span className="dsh-wt_announceVer">{T('annot.curVer')} v{LOCAL_VERSION}</span>
+              <button type="button" className="dsh-wt_announceBtn" disabled={updStatus === 'checking'} onClick={() => runUpdateCheck(true)}>{updStatus === 'checking' ? T('annot.checking') : T('annot.checkNow')}</button>
+              <span className="dsh-wt_announceAuto">{T('annot.autoCheck')}</span>
+              <button type="button" className={'dsh-wt_switch' + (autoCheckOn ? ' dsh-wt_switchOn' : '')} aria-pressed={autoCheckOn} aria-label={T('annot.autoCheck')} onClick={onAutoCheckToggle}><span className="dsh-wt_switchKnob" /></button>
+            </div>
+            {updInfo && (
+              <div className="dsh-wt_announceUpdate">
+                <span className="dsh-wt_announceNewVer">{T('annot.newVer')} v{updInfo.latest}</span>
+                <button type="button" className={'dsh-wt_announceUpg' + (updCopied ? ' dsh-wt_announceUpgOk' : '')} onClick={onCopyUpgrade}>{updCopied ? T('annot.copied') : T('annot.copyUpgrade')}</button>
+                <button type="button" className="dsh-wt_announceSkip dsh-wt_announceSkipGo" onClick={() => { try { window.open(updInfo.url, '_blank') } catch {} }}>{T('annot.gotoRelease')}</button>
+                <button type="button" className="dsh-wt_announceSkip" onClick={onSkipVersion}>{T('annot.skipVer')}</button>
+                <div className="dsh-wt_announceHow">{T('annot.howUpdate')}</div>
+              </div>
+            )}
+            {updStatus === 'failed' && <div className="dsh-wt_announceStatus">{T('annot.checkFail')}</div>}
+            {updStatus === 'uptodate' && !updInfo && <div className="dsh-wt_announceStatus">{T('annot.latest')}</div>}
+            <div className="dsh-wt_announceBody">{CHANGELOG_V030}</div>
+          </div>
+          </div>
+        ) : (
+        <div ref={gridRef} className="dsh-wt_consoleGrid" style={{ ['--wt-cols' as any]: cols }}>
         {cards.map((c) => (
           <div
             key={c.id}
+            data-flip={c.id}
             role={c.self ? undefined : 'button'}
             tabIndex={c.self ? -1 : 0}
             className={'dsh-wt_consoleCard' + (c.self ? ' dsh-wt_consoleCardSelf' : '')
@@ -1407,8 +2428,115 @@ function ConsolePane() {
           <span className="dsh-wt_consoleAddPlus" aria-hidden>＋</span>
           <span className="dsh-wt_consoleAddLabel">{T('console.addProject')}</span>
         </div>
+        {cards.length === 0 && <div className="dsh-wt_consoleEmpty">{T('console.empty')}</div>}
+        </div>
+        )}
       </div>
-      {cards.length === 0 && <div className="dsh-wt_consoleEmpty">{T('console.empty')}</div>}
+      <div className="dsh-wt_consoleDockWrap">
+        <div className="dsh-wt_consoleDock">
+          <button type="button" className={'dsh-wt_dockBtn' + (openMenu === 'theme' ? ' dsh-wt_dockBtnOn' : '')} title={T('console.themeLabel')} aria-label={T('console.themeLabel')} onClick={() => setOpenMenu(openMenu === 'theme' ? null : 'theme')}><ThemeIcon mode={themeMode} /></button>
+          <button type="button" className={'dsh-wt_dockBtn' + (openMenu === 'shape' ? ' dsh-wt_dockBtnOn' : '')} title={T('console.shapeLabel')} aria-label={T('console.shapeLabel')} onClick={() => setOpenMenu(openMenu === 'shape' ? null : 'shape')}><svg width="20" height="20" viewBox="0 0 16 16" aria-hidden><rect x="2.2" y="2.2" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="0.9" /><circle cx="10.6" cy="10.6" r="3.8" fill="none" stroke="currentColor" strokeWidth="0.9" /></svg></button>
+          <button type="button" className={'dsh-wt_dockBtn' + (openMenu === 'bg' ? ' dsh-wt_dockBtnOn' : '')} title={T('console.bgLabel')} aria-label={T('console.bgLabel')} onClick={() => { setOpenMenu(openMenu === 'bg' ? null : 'bg'); setBgEdit(null) }}><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden><rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.6" fill="none" stroke="currentColor" strokeWidth="0.9" /><circle cx="5.9" cy="6.7" r="1.05" fill="none" stroke="currentColor" strokeWidth="0.8" /><path d="M3.4 11.4l3-3 2.3 2.3 1.9-1.9 3 2.6" fill="none" stroke="currentColor" strokeWidth="0.9" /></svg></button>
+          <button type="button" className={'dsh-wt_dockBtn' + (openMenu === 'cols' ? ' dsh-wt_dockBtnOn' : '')} title={T('console.colsLabel')} aria-label={T('console.colsLabel')} onClick={() => setOpenMenu(openMenu === 'cols' ? null : 'cols')}><svg width="20" height="20" viewBox="0 0 16 16" aria-hidden><rect x="2.2" y="3.4" width="2.7" height="9.2" rx="0.9" fill="none" stroke="currentColor" strokeWidth="0.9" /><rect x="6.65" y="3.4" width="2.7" height="9.2" rx="0.9" fill="none" stroke="currentColor" strokeWidth="0.9" /><rect x="11.1" y="3.4" width="2.7" height="9.2" rx="0.9" fill="none" stroke="currentColor" strokeWidth="0.9" /></svg></button>
+          <button type="button" className={'dsh-wt_dockBtn' + (annOpen ? ' dsh-wt_dockBtnOn' : '')} title={T('annot.updateTitle')} aria-label={T('annot.updateTitle')} onClick={() => { setOpenMenu(null); setAnnOpen((v) => !v) }}><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden><path d="M2.6 7c0-2.9 2.4-4.9 5.4-4.9s5.4 2 5.4 4.9v2.9l1.2 1.7H1.4l1.2-1.7z" fill="none" stroke="currentColor" strokeWidth="0.9" strokeLinejoin="round" /><path d="M6.2 12.9c.3.7 1 1.2 1.8 1.2s1.5-.5 1.8-1.2" fill="none" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" /></svg>{updInfo && <span className="dsh-wt_dockBadge" aria-hidden />}</button>
+        </div>
+        {openMenu === 'theme' && (
+          <div className="dsh-wt_drop">
+            {themeOpts.map((o) => (
+              <button key={o.mode} type="button" className={'dsh-wt_dropItem' + (themeMode === o.mode ? ' dsh-wt_dropItemOn' : '')} onClick={() => setTheme(o.mode)}><ThemeIcon mode={o.mode} size={13} />{T(o.key)}</button>
+            ))}
+          </div>
+        )}
+        {openMenu === 'shape' && (
+          <div className="dsh-wt_drop">
+            <button type="button" className={'dsh-wt_dropItem' + (shape === 'square' ? ' dsh-wt_dropItemOn' : '')} onClick={() => onShape('square')}><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>{T('console.shapeSquare')}</button>
+            <button type="button" className={'dsh-wt_dropItem' + (shape === 'circle' ? ' dsh-wt_dropItemOn' : '')} onClick={() => onShape('circle')}><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>{T('console.shapeCircle')}</button>
+          </div>
+        )}
+        {openMenu === 'bg' && (
+          bgEdit === null ? (
+            <div className="dsh-wt_drop">
+              <div className="dsh-wt_dropRow">
+                <button type="button" className={'dsh-wt_dropItem' + (bg === 'plain' ? ' dsh-wt_dropItemOn' : '')} onClick={() => onBg('plain')}><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><rect x="3" y="3" width="10" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>{T('console.bgPlain')}</button>
+                <button type="button" className="dsh-wt_dropGear" title={T('console.bgEdit')} aria-label={T('console.bgEdit')} onClick={() => setBgEdit('plain')}><SliderIcon /></button>
+              </div>
+              <div className="dsh-wt_dropRow">
+                <button type="button" className={'dsh-wt_dropItem' + (bg === 'glow' ? ' dsh-wt_dropItemOn' : '')} onClick={() => onBg('glow')}><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><path d="M2.4 5.6c2-1.5 3.9-1.5 5.6 0 1.9 1.6 3.6 1.6 5.6 0M2.4 10.4c2-1.5 3.9-1.5 5.6 0 1.9 1.6 3.6 1.6 5.6 0" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>{T('console.bgGlow')}</button>
+                <button type="button" className="dsh-wt_dropGear" title={T('console.bgEdit')} aria-label={T('console.bgEdit')} onClick={() => setBgEdit('glow')}><SliderIcon /></button>
+              </div>
+              <div className="dsh-wt_dropRow">
+                <button type="button" className={'dsh-wt_dropItem' + (bg === 'photo' ? ' dsh-wt_dropItemOn' : '')} onClick={() => onBg('photo')}><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><rect x="2.5" y="3.5" width="11" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" /><circle cx="5.8" cy="6.6" r="1.1" fill="currentColor" /><path d="M3.2 11.2l2.8-2.8 2.2 2.2 1.8-1.8 2.8 2.4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>{T('console.bgCustom')}</button>
+                <button type="button" className="dsh-wt_dropGear" title={T('console.bgEdit')} aria-label={T('console.bgEdit')} onClick={() => setBgEdit('photo')}><SliderIcon /></button>
+              </div>
+            </div>
+          ) : (
+            <div className={'dsh-wt_drop' + (bgEdit === 'photo' ? ' dsh-wt_dropWide' : '')}>
+              <div className="dsh-wt_hslHead">
+                <button type="button" className="dsh-wt_hslBack" title={T('console.bgEditBack')} aria-label={T('console.bgEditBack')} onClick={() => setBgEdit(null)}><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden><path d="M10.2 3.2 5.4 8l4.8 4.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
+                <span className="dsh-wt_hslTitle">{bgEdit === 'plain' ? T('console.bgEditPlain') : bgEdit === 'glow' ? T('console.bgEditGlow') : T('console.bgEditPhoto')}</span>
+              </div>
+              {bgEdit === 'photo' && (
+                <>
+                  <div className="dsh-wt_dropRow">
+                    <button type="button" className="dsh-wt_dropItem" onClick={pickPhotoFile}><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden><rect x="2.5" y="3.5" width="11" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" /><circle cx="5.8" cy="6.6" r="1.1" fill="currentColor" /><path d="M3.2 11.2l2.8-2.8 2.2 2.2 1.8-1.8 2.8 2.4" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>{T('console.bgPhoto')}</button>
+                    <div className="dsh-wt_gridHalf">
+                      <span className="dsh-wt_gridLabel">{T('console.bgGridLabel')}</span>
+                      <button type="button" className={'dsh-wt_switch' + (photoGrid ? ' dsh-wt_switchOn' : '')} aria-pressed={photoGrid} aria-label={T('console.bgGridLabel')} onClick={togglePhotoGrid}><span className="dsh-wt_switchKnob" /></button>
+                    </div>
+                  </div>
+                  {photoList.length > 0 ? (
+                    photoList.slice(0, 4).map((p) => (
+                      <div key={p.id} data-rid={p.id} className={'dsh-wt_dropRow dsh-wt_photoRow' + (photoId === p.id ? ' dsh-wt_photoRowOn' : '')} onClick={() => selectPhoto(p)}>
+                        <span className="dsh-wt_thumbWrap">
+                          {p.kind === 'video'
+                            ? <video className="dsh-wt_photoThumb" src={p.url} muted playsInline preload="metadata" />
+                            : <img className="dsh-wt_photoThumb" src={p.url} alt="" />}
+                          <span className="dsh-wt_thumbBadge" aria-hidden>{p.kind === 'video'
+                            ? <svg width="8" height="8" viewBox="0 0 16 16"><path d="M4.5 3.8l8 4.2-8 4.2z" fill="currentColor" /></svg>
+                            : <svg width="8" height="8" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M3.4 11l2.6-2.6 2.1 2.1 1.7-1.7 2.8 2.4" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>}</span>
+                        </span>
+                        <span className="dsh-wt_photoName">{photoId === p.id ? T('console.bgPhotoCurrent') : T('console.bgPhotoUse')}</span>
+                        <button type="button" className={'dsh-wt_dragHandle' + (dragRowId === p.id ? ' dsh-wt_dragHandleOn' : '')} title={T('console.bgMediaDrag')} aria-label={T('console.bgMediaDrag')} onPointerDown={(e) => onHandleDown(p.id, e)}><svg width="10" height="12" viewBox="0 0 10 12" aria-hidden><circle cx="2.5" cy="2" r="1.1" fill="currentColor" /><circle cx="7.5" cy="2" r="1.1" fill="currentColor" /><circle cx="2.5" cy="6" r="1.1" fill="currentColor" /><circle cx="7.5" cy="6" r="1.1" fill="currentColor" /><circle cx="2.5" cy="10" r="1.1" fill="currentColor" /><circle cx="7.5" cy="10" r="1.1" fill="currentColor" /></svg></button>
+                        <button type="button" className="dsh-wt_dropTrash" title={T('console.bgPhotoDelete')} aria-label={T('console.bgPhotoDelete')} onClick={(e) => { e.stopPropagation(); removePhotoById(p) }}><svg width="11" height="11" viewBox="0 0 16 16" aria-hidden><path d="M2.5 4.2h11M6.5 4.2V2.9c0-.6.4-1 .9-1h1.2c.5 0 .9.4.9 1v1.3M4.2 4.2l.5 8.1c0 .7.5 1.2 1.2 1.2h4.2c.7 0 1.2-.5 1.2-1.2l.5-8.1" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" /></svg></button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="dsh-wt_photoEmpty">{T('console.bgPhotoNone')}</div>
+                  )}
+                  <div className="dsh-wt_hslDivider" />
+                </>
+              )}
+              {(() => {
+                const v = bgEdit === 'plain' ? plainHsl : bgEdit === 'glow' ? glowHsl : photoHsl
+                const sMax = bgEdit === 'plain' ? 100 : 200
+                const lMax = bgEdit === 'plain' ? 100 : 200
+                return (<>
+                  {bgEdit === 'glow' && (
+                    <div className="dsh-wt_hslRow" data-tip={T('console.bgTipSpeed')}><span className="dsh-wt_hslLabel">S</span><input className="dsh-wt_hslSlider" type="range" min={0} max={100} step={5} value={glowSpeed} onChange={(e) => onGlowSpeed(Number(e.target.value))} /><HslValInput value={glowSpeed} min={0} max={100} onCommit={onGlowSpeed} /></div>
+                  )}
+                  <div className="dsh-wt_hslRow" data-tip={T('console.bgTipB')}><span className="dsh-wt_hslLabel">B</span><input className="dsh-wt_hslSlider" type="range" min={0} max={20} step={1} value={bgEdit === 'plain' ? plainBlur : bgEdit === 'glow' ? glowBlur : cardBlur} onChange={(e) => onModeBlur(bgEdit, Number(e.target.value))} /><HslValInput value={bgEdit === 'plain' ? plainBlur : bgEdit === 'glow' ? glowBlur : cardBlur} min={0} max={20} onCommit={(n) => onModeBlur(bgEdit, n)} /></div>
+                  <div className="dsh-wt_hslRow" data-tip={T('console.bgTipT')}><span className="dsh-wt_hslLabel">T</span><input className="dsh-wt_hslSlider" type="range" min={0} max={30} step={1} value={bgEdit === 'plain' ? plainGrid : bgEdit === 'glow' ? glowGrid : gridOpacity} onChange={(e) => bgEdit === 'photo' ? onGridOpacity(Number(e.target.value)) : onModeGrid(bgEdit, Number(e.target.value))} /><HslValInput value={bgEdit === 'plain' ? plainGrid : bgEdit === 'glow' ? glowGrid : gridOpacity} min={0} max={30} onCommit={(n) => bgEdit === 'photo' ? onGridOpacity(n) : onModeGrid(bgEdit, n)} /></div>
+                  <div className="dsh-wt_hslRow" data-tip={T('console.bgTipH')}><span className="dsh-wt_hslLabel">H</span><input className="dsh-wt_hslSlider" type="range" min={-180} max={180} step={1} value={v.h} onChange={(e) => editHsl(bgEdit, { h: Number(e.target.value) })} /><HslValInput value={v.h} min={-180} max={180} onCommit={(n) => editHsl(bgEdit, { h: n })} /></div>
+                  <div className="dsh-wt_hslRow" data-tip={T('console.bgTipS')}><span className="dsh-wt_hslLabel">S</span><input className="dsh-wt_hslSlider" type="range" min={0} max={sMax} step={1} value={v.s} onChange={(e) => editHsl(bgEdit, { s: Number(e.target.value) })} /><HslValInput value={v.s} max={sMax} onCommit={(n) => editHsl(bgEdit, { s: n })} /></div>
+                  <div className="dsh-wt_hslRow" data-tip={T('console.bgTipL')}><span className="dsh-wt_hslLabel">L</span><input className="dsh-wt_hslSlider" type="range" min={0} max={lMax} step={1} value={v.l} onChange={(e) => editHsl(bgEdit, { l: Number(e.target.value) })} /><HslValInput value={v.l} max={lMax} onCommit={(n) => editHsl(bgEdit, { l: n })} /></div>
+                  <button type="button" className="dsh-wt_hslReset" onClick={() => resetHsl(bgEdit)}>{T('console.bgEditReset')}</button>
+                </>)
+              })()}
+            </div>
+          )
+        )}
+        {openMenu === 'cols' && (
+          <div className="dsh-wt_drop">
+            <div className="dsh-wt_hbar">
+              <span className="dsh-wt_hbarFill" style={{ width: (8 + (cols - 1) * 21) + '%' }} />
+              {[1, 2, 3, 4, 5].map((v) => (
+                <button key={v} type="button" className="dsh-wt_hbarLine" style={{ left: (8 + (v - 1) * 21) + '%' }} aria-label={String(v)} title={String(v)} onClick={() => onCols(v)}></button>
+              ))}
+              <span className="dsh-wt_hbarKnob" style={{ left: (8 + (cols - 1) * 21) + '%' }} />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1434,11 +2562,12 @@ function FileIcon() {
 }
 
 /** 资源管理器窗：树形展开（懒加载子目录；刷新/上一级均可用；.html 点击开浏览器标签）
- *  单标签（标签栏并入工具行）时：标题显示在路径前面，✕ 关标签挂到行尾 */
-function ExplorerPane(props: { row: PaneRow; index: number; barActions?: BarActions }) {
+ *  单标签（标签栏并入工具行）时：标题显示在路径前面，✕ 关标签挂到行尾
+ *  预置资源管理：可带 rootPath（分栏预览预置目录时定位到该根，而非会话 cwd） */
+function ExplorerPane(props: { row: PaneRow; index: number; barActions?: BarActions; rootPath?: string }) {
   const cacheRef = useRef<Record<string, any[]>>({})
   const expandedRef = useRef<Set<string>>(new Set())
-  const [rootPath, setRootPath] = useState('')
+  const [rootPath, setRootPath] = useState(props.rootPath ?? '')
   const [error, setError] = useState('')
   const [, setTick] = useState(0)
   const rerender = () => setTick((t) => t + 1)
@@ -1451,6 +2580,12 @@ function ExplorerPane(props: { row: PaneRow; index: number; barActions?: BarActi
         sessionId: splitEnv?.getScope()?.sessionId ?? '',
         cwd: splitEnv?.getScope()?.cwd ?? '',
       })
+      // 服务端判定路径是文件（{file:true}）：目录列表为空且无 readdir 错误，转成明确提示
+      if (d && d.file) {
+        cacheRef.current[d.path] = []
+        setError(T('pane.explorerIsFile'))
+        return { path: d.path, entries: [] }
+      }
       const entries: any[] = d.entries ?? []
       cacheRef.current[d.path] = entries
       setError(d.error ? String(d.error) : '')
@@ -1464,10 +2599,10 @@ function ExplorerPane(props: { row: PaneRow; index: number; barActions?: BarActi
   }, [])
 
   const initRoot = useCallback(async () => {
-    const r = await fetchDir(splitEnv?.getScope()?.cwd ?? '')
+    const r = await fetchDir(props.rootPath || splitEnv?.getScope()?.cwd || '')
     setRootPath(r.path)
     rerender()
-  }, [fetchDir])
+  }, [fetchDir, props.rootPath])
 
   useEffect(() => { initRoot() }, [initRoot])
 
@@ -1541,8 +2676,8 @@ function ExplorerPane(props: { row: PaneRow; index: number; barActions?: BarActi
         <button type="button" className="dsh-wt_subBtn" title="上一级" onClick={goUp}>⬆</button>
         <button type="button" className="dsh-wt_subBtn" title="刷新" onClick={refresh}>↻</button>
         <span className="dsh-wt_subPath">{rootPath || '…'}</span>
+        {props.barActions?.onAnnot && <button type="button" className="dsh-wt_subBtn dsh-wt_annotGo" title={T('annot.label')} aria-label={T('annot.label')} onClick={props.barActions.onAnnot}><AnnotGlyph /></button>}
         {props.barActions?.onClose && <button type="button" className="dsh-wt_subBtn" title={T('pane.closeTab')} aria-label={T('pane.closeTab')} onClick={props.barActions.onClose}>✕</button>}
-        {props.barActions?.onMinimize && <button type="button" className="dsh-wt_subBtn" title={T('split.minimize')} aria-label={T('split.minimize')} onClick={props.barActions.onMinimize}>─</button>}
       </div>
       <div className="dsh-wt_subList">
         {error && <div className="dsh-wt_subEmpty">{error}</div>}
@@ -2041,11 +3176,12 @@ function PaneTabBody(props: { tab: PaneTab; row: PaneRow; index: number; paneTit
   if (content.type === 'browser') return <BrowserPane key={props.tab.id} row={props.row} index={props.index} tabId={props.tab.id} content={content} reloadKey={props.reloadKey} barActions={props.barActions} />
   if (content.type === 'anim') return <AnimPane key={props.tab.id} row={props.row} index={props.index} tabId={props.tab.id} content={content} reloadKey={props.reloadKey} barActions={props.barActions} />
   if (content.type === 'console') return <ConsolePane />
-  if (content.type === 'explorer') return <ExplorerPane row={props.row} index={props.index} barActions={props.barActions} />
+  if (content.type === 'explorer') return <ExplorerPane row={props.row} index={props.index} barActions={props.barActions} rootPath={content.rootPath} />
   if (content.type === 'scm') return <GitPane />
   if (content.type === 'tasks') return <JobsPane />
   if (content.type === 'terminal') return <TerminalPane />
   if (content.type === 'custom') return <CustomPane paneTitle={props.paneTitle ?? ''} />
+  if (content.type === 'presets') return <PresetsPane row={props.row} index={props.index} tabId={props.tab.id} barActions={props.barActions} />
   return (
     <div className="dsh-wt_paneWip">
       <span className="dsh-wt_paneWipIcon" aria-hidden>{BUILTIN_ICONS[content.type] ?? '📦'}</span>
@@ -2060,15 +3196,47 @@ function refreshableTab(t: PaneTab): boolean {
   return c.kind === 'iframe' || (c.kind === 'builtin' && (c.type === 'browser' || c.type === 'anim'))
 }
 
-/** 单标签工具窗（浏览器/动画/资源管理器）：标签栏与工具行合并为一行——标题并入地址/路径行前面 */
+/** 单标签工具窗（浏览器/动画/资源管理器/预置资源）：标签栏与工具行合并为一行——标题并入地址/路径行前面
+ *  （预置资源的「返回窗格首页」由面板头部 ⌂ 提供，barActions 仅承载标题/✕） */
 function mergeBarTab(tabs: PaneTab[], active: number): boolean {
   if (tabs.length !== 1) return false
   const c = tabs[active]?.content
-  return !!c && c.kind === 'builtin' && (c.type === 'browser' || c.type === 'anim' || c.type === 'explorer')
+  return !!c && c.kind === 'builtin' && (c.type === 'browser' || c.type === 'anim' || c.type === 'explorer' || c.type === 'presets')
 }
 
-/** 合并行动作：标题 + 可选刷新/关闭（由 BrowserPane/AnimPane/ExplorerPane 渲染进自己的工具行） */
-export type BarActions = { title: string; onRefresh?: () => void; onClose?: () => void; onMinimize?: () => void }
+/** 合并行动作：标题 + 可选刷新/关闭/标注（由 BrowserPane/AnimPane/ExplorerPane 渲染进自己的工具行）；
+ *  最大化/最小化不在这里——它们是窗格级常驻按钮（右上角），与窗内容无关 */
+export type BarActions = { title: string; onRefresh?: () => void; onClose?: () => void; onAnnot?: () => void }
+
+/** 窗格右上角常驻窗控（最大化/最小化）：与窗内容无关——默认首页（选择器）/控制室/任意窗口都在 */
+function PaneWinBtns(props: { pane: SplitPane; row: PaneRow; index: number }) {
+  const { pane, row, index } = props
+  return (
+    <span className="dsh-wt_winBtns">
+      <button
+        type="button"
+        className="dsh-wt_winBtn"
+        title={pane.maximized ? T('split.restore') : T('split.maximize')}
+        aria-label={pane.maximized ? T('split.restore') : T('split.maximize')}
+        onClick={() => splitStore.setPaneMaximized(row, index, !pane.maximized)}
+      >{pane.maximized ? '❐' : '▢'}</button>
+      <button
+        type="button"
+        className="dsh-wt_winBtn"
+        title={T('split.minimize')}
+        aria-label={T('split.minimize')}
+        onClick={() => splitStore.setPaneMinimized(row, index, true)}
+      >─</button>
+    </span>
+  )
+}
+
+/** 标注按钮（工具行内联版）：气泡图标，点击进入「点击或拖动窗口中的位置提要求」 */
+function AnnotGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden><path d="M2 5.6c0-1.2 1-2.2 2.2-2.2h7.6c1.2 0 2.2 1 2.2 2.2v3.6c0 1.2-1 2.2-2.2 2.2H7.5L5 13.6l.3-2.4H4.2c-1.2 0-2.2-1-2.2-2.2z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>
+  )
+}
 
 /** 窗内容：标签页模型（无标签 = 6 选 1 选择器；标签可切换/关闭，关完回到选择器）
  *  网页类标签最左侧固定一个 ↻ 刷新按钮（标签名之前），点击重挂载该标签内容。
@@ -2089,21 +3257,23 @@ function PaneBody(props: { pane: SplitPane; row: PaneRow; index: number }) {
   const singleConsole = tabs.length === 1 && tabs[0].content?.kind === 'builtin' && tabs[0].content.type === 'console'
   // 单标签工具窗：标签栏并入工具行（标题在地址/路径前面，↻/✕ 挂到工具行尾部）
   const merged = !singleConsole && mergeBarTab(tabs, active)
-  const minimize = () => splitStore.setPaneMinimized(row, index, true)
+  const startAnnotHere = () => startAnnot(windowLabelOf(row, index))
   const barActions: BarActions | undefined = merged
     ? {
         title: tabs[active].title,
         onRefresh: refreshableTab(tabs[active]) ? () => refreshTab(tabs[active]) : undefined,
         onClose: () => splitStore.closeTab(row, index, tabs[active].id),
-        onMinimize: minimize,
+        onAnnot: startAnnotHere,
       }
     : undefined
   return (
     <>
-      {/* 非合并窗格：标签行容器，最左固定「最小化」按钮（标签区可滚动，按钮不随之滚出） */}
+      {/* 非合并窗格：标签行容器，最左「标注」按钮（标签区可滚动，按钮不随之滚出） */}
       {!merged && (
       <div className="dsh-wt_tabBarWrap">
-        <button type="button" className="dsh-wt_paneMinBtn" title={T('split.minimize')} aria-label={T('split.minimize')} onClick={minimize}>─</button>
+        <button type="button" className="dsh-wt_annotBtn" title={T('annot.label')} aria-label={T('annot.label')} onClick={startAnnotHere}>
+          <svg viewBox="0 0 16 16" aria-hidden><path d="M2 5.6c0-1.2 1-2.2 2.2-2.2h7.6c1.2 0 2.2 1 2.2 2.2v3.6c0 1.2-1 2.2-2.2 2.2H7.5L5 13.6l.3-2.4H4.2c-1.2 0-2.2-1-2.2-2.2z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg>
+        </button>
         {!singleConsole && (
         <div className="dsh-wt_tabBar">
           {tabs.map((t, i) => {
@@ -2182,6 +3352,9 @@ function PanePicker(props: { row: PaneRow; index: number }) {
       </button>
       <button type="button" className="dsh-wt_panePick" onClick={() => pick({ kind: 'builtin', type: 'terminal' })}>
         <span aria-hidden>▸_</span>{T('pane.terminal')}
+      </button>
+      <button type="button" className="dsh-wt_panePick" onClick={() => pick({ kind: 'builtin', type: 'presets' })}>
+        <span aria-hidden>📌</span>{T('pane.presets')}
       </button>
       <button type="button" className="dsh-wt_panePick" onClick={() => pick({ kind: 'builtin', type: 'custom' })}>
         <span aria-hidden>✨</span>{T('pane.custom')}
@@ -2267,6 +3440,7 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
   const barW = Math.max(0, Math.min(hasLeft || chatFull ? contentW : (hasTop ? colW : contentW), colW - BAR_RIGHT_INSET))
 
   // 行「可见性」：该行是否有未最小化（未让出）的窗；整行全收起时该行高度收缩为 0，避免留空黑框
+  // 最大化 = 其余窗全部最小化让位（store 已保证），唯一可见窗自动占满整行，对话窗 margin 不受影响
   const topVisible = top.some((p) => !p.minimized)
   const mainVisible = main.some((p) => !p.minimized)
   // 顶行高度：顶行可见才占位；若顶行是唯一可见行（主行全收起），自动占满全部高度
@@ -2288,8 +3462,9 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
   const paneBottom = g.bottom
   const topY = barTop + BAR_H
 
-  const renderPane = (it: { pane: SplitPane; left: number; width: number; gone: boolean }, row: PaneRow, index: number, x: number, y: number, h: number) =>
-    it.gone || it.pane.minimized ? null : (
+  const renderPane = (it: { pane: SplitPane; left: number; width: number; gone: boolean }, row: PaneRow, index: number, x: number, y: number, h: number) => {
+    if (it.gone || it.pane.minimized) return null
+    return (
     <div
       key={it.pane.id}
       className="dsh-wt_pane"
@@ -2314,10 +3489,12 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
       }}
     >
       <PaneBody pane={it.pane} row={row} index={index} />
+      <PaneWinBtns pane={it.pane} row={row} index={index} />
     </div>
-    )
+  )
+  }
 
-  // 收集所有被最小化的窗格（按 left/top/main 顺序），图标横排进标题栏右端，点击还原
+  // 收集所有被最小化（含最大化期间被挤出）的窗格（按 left/top/main 顺序），横排进标题栏右端，点击恢复
   const minimizedPanes: { row: PaneRow; index: number; pane: SplitPane }[] = []
   if (spec.left?.minimized) minimizedPanes.push({ row: 'left', index: 0, pane: spec.left })
   ;(spec.top ?? []).forEach((p, i) => { if (p.minimized) minimizedPanes.push({ row: 'top', index: i, pane: p }) })
@@ -2386,7 +3563,7 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
           className="dsh-wt_splitDivider"
           role="separator"
           title="拖动调整宽度"
-          style={{ position: 'fixed', left: topRowX + it.left + it.width, top: topY, width: DIVIDER, height: topH, zIndex: 72 }}
+          style={{ position: 'fixed', left: topRowX + it.left + it.width - DIVIDER / 2, top: topY, width: DIVIDER, height: topH, zIndex: 72 }}
           onPointerDown={makeDividerHandler('topPane', i)}
         />
         ) : null
@@ -2399,7 +3576,7 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
           className="dsh-wt_splitDivider"
           role="separator"
           title="拖动调整宽度"
-          style={{ position: 'fixed', left: contentX + it.left + it.width, top: bodyTop, width: DIVIDER, height: mainH, zIndex: 72 }}
+          style={{ position: 'fixed', left: contentX + it.left + it.width - DIVIDER / 2, top: bodyTop, width: DIVIDER, height: mainH, zIndex: 72 }}
           onPointerDown={makeDividerHandler('pane', i)}
         />
         ) : null
@@ -2421,6 +3598,7 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
         onPointerDown={makeDividerHandler(hasLeft ? 'left' : 'chat')}
       />
       )}
+      <AnnotationOverlay />
     </>
   )
 }
