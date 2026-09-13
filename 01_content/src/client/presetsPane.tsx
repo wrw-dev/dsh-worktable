@@ -5,9 +5,10 @@
  * dir → 分栏资源管理器（rootPath 定位）/ 后端 open-path 唤起系统资源管理器。
  * 视觉复用 custom 系列控件（dsh-wt_customRow/Label/PathInput/ModeBtn），克制不加新轮子。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { splitStore, T, postJson, type PaneRow, type BarActions } from './split'
-import { isAbs } from './pathutil'
+import { isAbs, parentPathOf } from './pathutil'
 import {
   loadPresets, savePreset, removePreset, newPresetId, autoName, originOfPreset,
   protectSecret, revealSecret, maskSecret, stagePresetFill,
@@ -165,6 +166,7 @@ function PresetForm(props: { initial: PresetEntry | null; onDone: (list: PresetE
   const [openMode, setOpenMode] = useState<PresetOpenMode>(init?.openMode ?? 'split')
   const [err, setErr] = useState('')
   const [warn, setWarn] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // 目录存在性软校验（400ms 防抖）：不存在仅警告，不阻止保存
   useEffect(() => {
@@ -292,16 +294,32 @@ function PresetForm(props: { initial: PresetEntry | null; onDone: (list: PresetE
           </div>
         </>
       ) : (
-        <div className="dsh-wt_customRow">
-          <span className="dsh-wt_customLabel">{T('preset.dir')}</span>
-          <input
-            className="dsh-wt_customPathInput"
-            placeholder={T('preset.dirPh')}
-            spellCheck={false}
-            value={dirPath}
-            onChange={(e) => setDirPath(e.target.value)}
-          />
-        </div>
+        <>
+          <div className="dsh-wt_customRow">
+            <span className="dsh-wt_customLabel">{T('preset.dir')}</span>
+            <input
+              className="dsh-wt_customPathInput"
+              placeholder={T('preset.dirPh')}
+              spellCheck={false}
+              value={dirPath}
+              onChange={(e) => setDirPath(e.target.value)}
+            />
+            <button
+              type="button"
+              className="dsh-wt_presetBrowse"
+              title={T('preset.browse')}
+              aria-label={T('preset.browse')}
+              onClick={() => setPickerOpen(true)}
+            >📂</button>
+          </div>
+          {pickerOpen && (
+            <PathPickerModal
+              initial={dirPath.trim()}
+              onPick={(p) => { setDirPath(p); setPickerOpen(false) }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </>
       )}
       <div className="dsh-wt_customRow">
         <span className="dsh-wt_customLabel">{T('preset.openMode')}</span>
@@ -328,5 +346,153 @@ function PresetForm(props: { initial: PresetEntry | null; onDone: (list: PresetE
         <button type="button" className="dsh-wt_presetBtn" onClick={props.onCancel}>{T('preset.cancel')}</button>
       </div>
     </div>
+  )
+}
+
+/** 本地资源路径选择弹窗（fixed 居中模态）：面包屑导航 + 文件/目录列表；
+ *  数据走既有 /api/worktable/fs（文件目录混合，isDir 标注）；目录行点击=进入，
+ *  文件行点击=直接选定；「选择当前目录」把当前目录整条路径回填表单。
+ *  initial 语义：合法已填路径 → 文件取父目录、目录取自身作为起始目录；其余回退服务端默认（会话 cwd）。 */
+function PathPickerModal(props: { initial: string; onPick: (p: string) => void; onClose: () => void }) {
+  // 初始目录推导（纯客户端，不发请求）：非空且绝对 → 交给服务端探测（文件自动落父目录）；
+  // 否则不带 path，让服务端用会话 cwd 兜底
+  const startPath = (() => {
+    const p = props.initial
+    if (!p || !isAbs(p)) return ''
+    return p
+  })()
+
+  const [cwd, setCwd] = useState('')
+  const [entries, setEntries] = useState<{ name: string; path: string; isDir: boolean }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState('')
+  const [truncated, setTruncated] = useState(false)
+  const [drives, setDrives] = useState<string[]>([])
+  const seqRef = useRef(0)
+
+  const load = (p: string) => {
+    const seq = ++seqRef.current
+    setLoading(true)
+    setLoadErr('')
+    postJson('/api/worktable/fs', p ? { path: p } : {})
+      .then((d) => {
+        if (seq !== seqRef.current) return // 过期响应（已被后续导航取代）
+        if (d && d.file && typeof d.path === 'string' && d.path) {
+          // 初始是文件：/fs 回 { file:true, entries:[] }——自动落到父目录浏览
+          load(parentPathOf(d.path))
+          return
+        }
+        setLoading(false)
+        if (!d || d.error || !Array.isArray(d.entries)) {
+          // /fs 对不存在路径回 500 { error }：展示错误但保留面包屑可回上级
+          setLoadErr((d && d.error) ? String(d.error) : T('preset.pickErr'))
+          return
+        }
+        setCwd(d.path || p)
+        setEntries(d.entries)
+        setTruncated(!!d.truncated)
+      })
+      .catch(() => { if (seq === seqRef.current) { setLoading(false); setLoadErr(T('preset.pickErr')) } })
+  }
+
+  useEffect(() => {
+    load(startPath)
+    // 盘符列表（服务端枚举；失败静默——盘符条只是快捷入口，坏了不影响手填与导航）
+    postJson('/api/worktable/drives', {}).then((d) => { if (d && Array.isArray(d.drives)) setDrives(d.drives) }).catch(() => {})
+  }, [])
+
+  // 面包屑：从盘符/UNC 根到当前目录的祖先链（parentPathOf 逐级上溯；根处停）
+  const crumbs = (() => {
+    if (!cwd) return [] as { name: string; path: string }[]
+    const chain: { name: string; path: string }[] = []
+    let cur = cwd
+    const guard = new Set<string>()
+    while (cur && !guard.has(cur)) {
+      guard.add(cur)
+      chain.unshift({ name: cur.endsWith('\\') || cur.endsWith('/') ? cur : cur.split(/[\\/]/).filter(Boolean).pop() || cur, path: cur })
+      const parent = parentPathOf(cur)
+      if (parent === cur) break
+      cur = parent
+    }
+    return chain
+  })()
+
+  return createPortal(
+    <>
+      <div className="dsh-wt_pathPickerBackdrop" onClick={props.onClose} />
+      <div className="dsh-wt_pathPicker" role="dialog" aria-label={T('preset.pickTitle')}>
+        <div className="dsh-wt_pathPickerHead">
+          <span className="dsh-wt_pathPickerTitle">{T('preset.pickTitle')}</span>
+          <button type="button" className="dsh-wt_presetBack" title={T('preset.cancel')} aria-label={T('preset.cancel')} onClick={props.onClose}>✕</button>
+        </div>
+        {drives.length > 0 && (
+          <div className="dsh-wt_pathPickerDrives">
+            {drives.map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={'dsh-wt_pathPickerDrive' + (cwd && (cwd.toUpperCase().startsWith(d + ':') || cwd === d) ? ' on' : '')}
+                title={d + ':\\'}
+                onClick={() => load(d + ':\\')}
+              >{d}</button>
+            ))}
+          </div>
+        )}
+        <div className="dsh-wt_pathPickerCrumbs">
+          <button type="button" className="dsh-wt_pathPickerCrumb" onClick={() => load('')}>{T('preset.pickRoot')}</button>
+          {crumbs.map((c) => (
+            <button key={c.path} type="button" className="dsh-wt_pathPickerCrumb" title={c.path} onClick={() => load(c.path)}>{c.name}</button>
+          ))}
+        </div>
+        <div className="dsh-wt_pathPickerList">
+          {loading && <p className="dsh-wt_subEmpty">{T('preset.pickLoading')}</p>}
+          {!loading && loadErr && (
+            <>
+              <p className="dsh-wt_presetErr">{loadErr}</p>
+              {cwd && (
+                <button type="button" className="dsh-wt_subRow" onClick={() => load(parentPathOf(cwd))}>
+                  <span className="dsh-wt_subIcon" aria-hidden>⬆</span>
+                  <span className="dsh-wt_subName">{T('preset.pickUp')}</span>
+                </button>
+              )}
+            </>
+          )}
+          {!loading && !loadErr && entries.length === 0 && <p className="dsh-wt_subEmpty">{T('preset.pickEmpty')}</p>}
+          {!loading && !loadErr && entries.map((e) => (
+            <button
+              key={e.path}
+              type="button"
+              className="dsh-wt_subRow"
+              title={e.path}
+              onClick={() => { if (e.isDir) load(e.path); else props.onPick(e.path) }}
+            >
+              <span className="dsh-wt_subIcon" aria-hidden>{e.isDir ? '📁' : '📄'}</span>
+              <span className="dsh-wt_subName">{e.name}</span>
+              {e.isDir && <span className="dsh-wt_subTag">{T('preset.pickDirTag')}</span>}
+            </button>
+          ))}
+          {!loading && !loadErr && truncated && <p className="dsh-wt_pathPickerTrunc">{T('preset.pickTruncated')}</p>}
+        </div>
+        <div className="dsh-wt_pathPickerFoot">
+          <span className="dsh-wt_pathPickerCwd" title={cwd}>{cwd || '—'}</span>
+          <div className="dsh-wt_pathPickerBtns">
+            <button
+              type="button"
+              className="dsh-wt_pathPickerUp"
+              disabled={!cwd}
+              title={T('preset.pickUp')}
+              onClick={() => { if (cwd) load(parentPathOf(cwd)) }}
+            >⬆ {T('preset.pickUp')}</button>
+            <button
+              type="button"
+              className="dsh-wt_presetBtnPrimary"
+              disabled={!cwd}
+              onClick={() => { if (cwd) props.onPick(cwd) }}
+            >{T('preset.pickSelectDir')}</button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body,
   )
 }

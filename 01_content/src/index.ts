@@ -658,6 +658,37 @@ export function apply(ctx: Context) {
     },
   })
 
+  // 预置资源管理：枚举本机盘符（A-Z，stat 探测存在性；给路径选择弹窗做盘符切换）
+  webServer.register({
+    kind: 'exact',
+    path: '/api/worktable/drives',
+    handler: async (_req: any, res: any) => {
+      try {
+        const drives: string[] = []
+        if (process.platform === 'win32') {
+          // 并发 stat 26 个盘符根目录（不存在即 ENOENT，静默跳过）
+          const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+          await Promise.all(letters.map(async (L) => {
+            const root = L + ':\\'
+            try { await stat(root); drives.push(L) } catch {}
+          }))
+          drives.sort()
+        } else {
+          // POSIX：根目录下的挂载点作为「盘」；macOS 额外带 /Volumes
+          const base = process.platform === 'darwin' ? '/Volumes' : '/'
+          const dirents = await readdir(base, { withFileTypes: true }).catch(() => [])
+          for (const d of dirents) {
+            if (d.isDirectory()) drives.push(base === '/' ? '/' + d.name : base + '/' + d.name)
+          }
+          if (base === '/') drives.unshift('/')
+        }
+        json(res, 200, { drives })
+      } catch (err) {
+        json(res, 500, { drives: [], error: String(err) })
+      }
+    },
+  })
+
   // 预置资源管理：暂存分栏打开的登录凭据（仅内存、90 秒 TTL；该源代理 HTML 注入只填不提交脚本）
   webServer.register({
     kind: 'exact',

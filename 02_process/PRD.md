@@ -409,6 +409,7 @@ type SplitPane = {
 | 任务管理 | ✅ 已实现（第一版） | 客户端 sessions 快照 jobsBySession（后台任务列表，2s 刷新） |
 | 自定义 vibe | ✅ 可闭环 | 描述需求 → agent 生成新项目（插件/站点）→ 注册进工作台（UI 已留 ✨ 入口）。✨ 自定义窗两模式（新建对话/发送到会话）点发送后调用宿主 sessions.open(会话id)，右侧对话窗自动切到目标会话（2026-08-18 无头探针实测 switched=true） |
 | 预置资源 | ✅ 已实现（第一版，2026-09-12） | 窗格选择器 📌 磁贴；条目两类（浏览器链接 / 本地资源路径（目录或文件））× 两种打开模式（工作台分栏 = BrowserPane 走 /embed 代理（凭据自动填充，只填不提交）；路径先 /fs 探测——目录挂 ExplorerPane rootPath、文件直接开 FileViewer 文件预览标签；外部 = window.open 或 /api/worktable/open-path→explorer.exe）。增删改查 + 密码掩码 + URL/路径校验 + 复制账号/密码按钮（外部打开无自动填充的补偿） |
+| 预置资源·路径选择弹窗 | ✅ 已实现（2026-09-14） | 本地资源路径输入框旁 📂 → PathPickerModal（React portal 挂 body + z-index 6000 置顶，不被窗格遮挡）：服务端 /api/worktable/drives 枚举盘符（A-Z stat 探测；POSIX 回 / 与挂载点）→ 盘符快捷条；面包屑导航 + 目录/文件混合列表（目录行进入、文件行选中、页脚选当前目录）；初始是文件路径自动落到父目录；输入框保持可编辑，手填/粘贴与弹窗选择双通道 |
 
 ### 13.8 里程碑
 

@@ -37,6 +37,7 @@
 - Two open modes per entry: **workspace split** (embedded browser, or file preview for local files) or **external** (system default app, with copy-account / copy-password buttons)
 - Split-open of a login page auto-fills the staged account/password — **fills only, never submits**; staged data expires in 90 seconds and is wiped right after filling
 - File paths open as an in-pane file preview; folder paths open the file explorer at that folder
+- The local-resource path field (📂) opens a top-most browse dialog: quick drive switcher (C / D / E…), breadcrumb navigation, mixed folder/file list — click a folder to enter, click a file to pick it; you can also just type or paste a path. The dialog renders above everything, never hidden behind panes
 
 ### 🖥️ Control room (built-in default project)
 

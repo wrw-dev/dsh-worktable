@@ -8147,6 +8147,31 @@ var css = xterm_default + "\n" + [
   ".dsh-wt_presetToast{color:var(--dsw-alias-state-success,#3fb950)}",
   ".dsh-wt_presetWarn{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-warning,#e0a33c)}",
   ".dsh-wt_presetErr{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-danger,#f85149)}",
+  // 本地资源路径选择弹窗（portal 到 body + z-index 6000，压过窗格/标注/会话切换等一切层；
+  // 视觉沿用 confirm 系列克制风格）
+  ".dsh-wt_presetBrowse{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:6px;background:transparent;font:inherit;font-size:13px;line-height:1;cursor:pointer}",
+  ".dsh-wt_presetBrowse:hover{border-color:var(--dsw-alias-border-l2,#3a4150);background:var(--dsw-alias-fill-l1,rgba(255,255,255,.05))}",
+  ".dsh-wt_pathPicker{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6000;width:min(480px,calc(100vw - 32px));max-height:min(560px,calc(100vh - 32px));display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2,#3a4150);border-radius:10px;background:var(--dsw-alias-bg-base,#0b0e14);box-shadow:var(--dsw-shadow-lv2,0 8px 24px rgba(0,0,0,.4))}",
+  ".dsh-wt_pathPickerHead{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#262b36)}",
+  ".dsh-wt_pathPickerTitle{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-primary,#e6e8eb)}",
+  ".dsh-wt_pathPickerDrives{flex:none;display:flex;align-items:center;gap:3px;padding:5px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,#262b36);overflow-x:auto;white-space:nowrap}",
+  ".dsh-wt_pathPickerDrive{flex:none;min-width:24px;padding:2px 6px;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary,#9aa4b2);font:inherit;font-size:10.5px;line-height:15px;cursor:pointer}",
+  ".dsh-wt_pathPickerDrive:hover{color:var(--dsw-alias-label-primary,#e6e8eb);border-color:var(--dsw-alias-border-l2,#3a4150)}",
+  ".dsh-wt_pathPickerDrive.on{color:var(--dsw-alias-state-accent-primary,#4f8ef7);border-color:var(--dsw-alias-state-accent-primary,#4f8ef7)}",
+  ".dsh-wt_pathPickerBackdrop{position:fixed;left:0;top:0;right:0;bottom:0;z-index:5999;background:rgba(0,0,0,.35)}",
+  ".dsh-wt_pathPickerCrumbs{flex:none;display:flex;align-items:center;gap:2px;padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,#262b36);overflow-x:auto;white-space:nowrap}",
+  ".dsh-wt_pathPickerCrumb{flex:none;padding:2px 6px;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary,#9aa4b2);font:inherit;font-size:11px;line-height:16px;cursor:pointer}",
+  ".dsh-wt_pathPickerCrumb:hover{color:var(--dsw-alias-label-primary,#e6e8eb);background:var(--dsw-alias-fill-l1,rgba(255,255,255,.06))}",
+  ".dsh-wt_pathPickerList{flex:1;min-height:120px;overflow:auto;padding:4px}",
+  ".dsh-wt_pathPickerList .dsh-wt_subEmpty{padding:18px 10px}",
+  ".dsh-wt_pathPickerList .dsh-wt_presetErr{padding:2px 8px}",
+  ".dsh-wt_pathPickerTrunc{margin:0;padding:6px 8px;font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary,#6e7683)}",
+  ".dsh-wt_pathPickerFoot{flex:none;display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--dsw-alias-border-l1,#262b36)}",
+  ".dsh-wt_pathPickerCwd{flex:1;min-width:0;font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary,#6e7683);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+  ".dsh-wt_pathPickerBtns{flex:none;display:flex;align-items:center;gap:6px}",
+  ".dsh-wt_pathPickerUp{flex:none;padding:3px 10px;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#9aa4b2);font:inherit;font-size:11px;line-height:16px;cursor:pointer}",
+  ".dsh-wt_pathPickerUp:hover:not(:disabled){color:var(--dsw-alias-label-primary,#e6e8eb);border-color:var(--dsw-alias-border-l2,#3a4150)}",
+  ".dsh-wt_pathPickerUp:disabled{opacity:.45;cursor:default}",
   ".dsh-wt_selectDivider{height:1px;background:var(--dsw-alias-border-l1,#262b36);margin:6px 2px}",
   // 文件夹分组标题：与选项同字号、加粗、左侧蓝色竖条 + 微底色，明显区别于下方对话
   ".dsh-wt_selectGroup{display:flex;align-items:center;gap:6px;margin:2px 0 2px;padding:6px 8px;border-left:2px solid var(--dsw-alias-state-accent-primary,#4f8ef7);border-radius:4px;background:var(--dsw-alias-fill-l1,rgba(255,255,255,.04));font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary,#9aa4b2);user-select:none}",
@@ -8589,6 +8614,16 @@ var zh = {
   "preset.externalHint": "\u5916\u90E8\u6D4F\u89C8\u5668\u65E0\u6CD5\u81EA\u52A8\u586B\u5145\uFF0C\u7528\u53F3\u4FA7\u6309\u94AE\u590D\u5236\u8D26\u53F7/\u5BC6\u7801\u540E\u7C98\u8D34\u767B\u5F55\u3002",
   "preset.fillHint": "\u5DF2\u4E3A\u8BE5\u7AD9\u70B9\u6682\u5B58\u81EA\u52A8\u586B\u5145\uFF0890 \u79D2\u5185\u6709\u6548\uFF0C\u586B\u5145\u5B8C\u6210\u540E\u7ACB\u5373\u6E05\u9664\uFF09",
   "preset.hintFillLimit": "\u81EA\u52A8\u586B\u5145\u6309\u5E38\u89C1\u767B\u5F55\u8868\u5355\u7ED3\u6784\u8BC6\u522B\uFF0C\u90E8\u5206\u7F51\u7AD9\u53EF\u80FD\u65E0\u6CD5\u8BC6\u522B\uFF08\u53EA\u586B\u5165\uFF0C\u4E0D\u81EA\u52A8\u63D0\u4EA4\uFF09\u3002",
+  "preset.browse": "\u6D4F\u89C8\u9009\u62E9\u6587\u4EF6\u6216\u76EE\u5F55",
+  "preset.pickTitle": "\u9009\u62E9\u672C\u5730\u8D44\u6E90\u8DEF\u5F84",
+  "preset.pickRoot": "\u9ED8\u8BA4",
+  "preset.pickUp": "\u4E0A\u4E00\u7EA7",
+  "preset.pickSelectDir": "\u9009\u62E9\u5F53\u524D\u76EE\u5F55",
+  "preset.pickDirTag": "\u76EE\u5F55",
+  "preset.pickLoading": "\u6B63\u5728\u8BFB\u53D6\u76EE\u5F55\u2026",
+  "preset.pickEmpty": "\u6B64\u76EE\u5F55\u4E3A\u7A7A",
+  "preset.pickErr": "\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25\uFF08\u53EF\u80FD\u4E0D\u5B58\u5728\u6216\u65E0\u6743\u9650\uFF09",
+  "preset.pickTruncated": "\u6761\u76EE\u8FC7\u591A\uFF0C\u4EC5\u663E\u793A\u524D 500 \u9879",
   "custom.title": "\u81EA\u5B9A\u4E49\u8FD9\u4E2A\u7A97\u53E3",
   "custom.hint": "\u53D1\u9001\u540E\u5C06\u81EA\u52A8\u65B0\u5EFA\u4E00\u4E2A\u4F1A\u8BDD\uFF0C\u4E13\u95E8\u8D1F\u8D23\u8FD9\u4E2A\u7A97\u53E3\u7684\u81EA\u5B9A\u4E49\u8BBE\u8BA1\u3002",
   "custom.placeholder": "\u544A\u8BC9 AI \u4F60\u60F3\u8BA9\u8FD9\u4E2A\u7A97\u53E3\u505A\u4EC0\u4E48\uFF0C\u4F8B\u5982\uFF1A\u505A\u4E00\u4E2A\u5C55\u793A\u6211\u65C5\u884C\u8DB3\u8FF9\u7684\u65F6\u95F4\u7EBF\u9875\u9762\u2026",
@@ -8863,6 +8898,16 @@ var en = {
   "preset.externalHint": "An external browser cannot be auto-filled \u2014 use the buttons to copy the account/password, then paste.",
   "preset.fillHint": "Auto-fill staged for this site (valid 90s, wiped right after filling)",
   "preset.hintFillLimit": "Auto-fill recognizes common login form structures; some sites may not be recognized (it fills only, never submits).",
+  "preset.browse": "Browse for a file or folder",
+  "preset.pickTitle": "Choose a local path",
+  "preset.pickRoot": "Default",
+  "preset.pickUp": "Up",
+  "preset.pickSelectDir": "Select this folder",
+  "preset.pickDirTag": "folder",
+  "preset.pickLoading": "Reading folder\u2026",
+  "preset.pickEmpty": "This folder is empty",
+  "preset.pickErr": "Failed to read the folder (missing or no access)",
+  "preset.pickTruncated": "Too many entries \u2014 showing the first 500 only",
   "custom.title": "Customize this pane",
   "custom.hint": "Sending will create a new conversation dedicated to designing this pane.",
   "custom.placeholder": "Tell the AI what you want this pane to do, e.g. a timeline page of my travels\u2026",
@@ -9328,6 +9373,7 @@ function listenPresetFill(onFill) {
 
 // src/client/presetsPane.tsx
 var import_react = require("react");
+var import_react_dom = require("react-dom");
 var import_jsx_runtime = require("react/jsx-runtime");
 function normalizePresetUrl(raw) {
   const t = raw.trim();
@@ -9492,6 +9538,7 @@ function PresetForm(props) {
   const [openMode, setOpenMode] = (0, import_react.useState)(init?.openMode ?? "split");
   const [err, setErr] = (0, import_react.useState)("");
   const [warn, setWarn] = (0, import_react.useState)("");
+  const [pickerOpen, setPickerOpen] = (0, import_react.useState)(false);
   (0, import_react.useEffect)(() => {
     if (kind !== "dir" || !dirPath.trim() || !isAbs(dirPath.trim())) {
       setWarn("");
@@ -9651,16 +9698,40 @@ function PresetForm(props) {
           }
         )
       ] })
-    ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", children: T("preset.dir") }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "input",
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", children: T("preset.dir") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          "input",
+          {
+            className: "dsh-wt_customPathInput",
+            placeholder: T("preset.dirPh"),
+            spellCheck: false,
+            value: dirPath,
+            onChange: (e) => setDirPath(e.target.value)
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "dsh-wt_presetBrowse",
+            title: T("preset.browse"),
+            "aria-label": T("preset.browse"),
+            onClick: () => setPickerOpen(true),
+            children: "\u{1F4C2}"
+          }
+        )
+      ] }),
+      pickerOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        PathPickerModal,
         {
-          className: "dsh-wt_customPathInput",
-          placeholder: T("preset.dirPh"),
-          spellCheck: false,
-          value: dirPath,
-          onChange: (e) => setDirPath(e.target.value)
+          initial: dirPath.trim(),
+          onPick: (p) => {
+            setDirPath(p);
+            setPickerOpen(false);
+          },
+          onClose: () => setPickerOpen(false)
         }
       )
     ] }),
@@ -9692,6 +9763,156 @@ function PresetForm(props) {
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: props.onCancel, children: T("preset.cancel") })
     ] })
   ] });
+}
+function PathPickerModal(props) {
+  const startPath = (() => {
+    const p = props.initial;
+    if (!p || !isAbs(p)) return "";
+    return p;
+  })();
+  const [cwd, setCwd] = (0, import_react.useState)("");
+  const [entries, setEntries] = (0, import_react.useState)([]);
+  const [loading, setLoading] = (0, import_react.useState)(true);
+  const [loadErr, setLoadErr] = (0, import_react.useState)("");
+  const [truncated, setTruncated] = (0, import_react.useState)(false);
+  const [drives, setDrives] = (0, import_react.useState)([]);
+  const seqRef = (0, import_react.useRef)(0);
+  const load = (p) => {
+    const seq = ++seqRef.current;
+    setLoading(true);
+    setLoadErr("");
+    postJson("/api/worktable/fs", p ? { path: p } : {}).then((d) => {
+      if (seq !== seqRef.current) return;
+      if (d && d.file && typeof d.path === "string" && d.path) {
+        load(parentPathOf(d.path));
+        return;
+      }
+      setLoading(false);
+      if (!d || d.error || !Array.isArray(d.entries)) {
+        setLoadErr(d && d.error ? String(d.error) : T("preset.pickErr"));
+        return;
+      }
+      setCwd(d.path || p);
+      setEntries(d.entries);
+      setTruncated(!!d.truncated);
+    }).catch(() => {
+      if (seq === seqRef.current) {
+        setLoading(false);
+        setLoadErr(T("preset.pickErr"));
+      }
+    });
+  };
+  (0, import_react.useEffect)(() => {
+    load(startPath);
+    postJson("/api/worktable/drives", {}).then((d) => {
+      if (d && Array.isArray(d.drives)) setDrives(d.drives);
+    }).catch(() => {
+    });
+  }, []);
+  const crumbs = (() => {
+    if (!cwd) return [];
+    const chain = [];
+    let cur = cwd;
+    const guard = /* @__PURE__ */ new Set();
+    while (cur && !guard.has(cur)) {
+      guard.add(cur);
+      chain.unshift({ name: cur.endsWith("\\") || cur.endsWith("/") ? cur : cur.split(/[\\/]/).filter(Boolean).pop() || cur, path: cur });
+      const parent = parentPathOf(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
+    return chain;
+  })();
+  return (0, import_react_dom.createPortal)(
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_pathPickerBackdrop", onClick: props.onClose }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPicker", role: "dialog", "aria-label": T("preset.pickTitle"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerHead", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_pathPickerTitle", children: T("preset.pickTitle") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBack", title: T("preset.cancel"), "aria-label": T("preset.cancel"), onClick: props.onClose, children: "\u2715" })
+        ] }),
+        drives.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_pathPickerDrives", children: drives.map((d) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          "button",
+          {
+            type: "button",
+            className: "dsh-wt_pathPickerDrive" + (cwd && (cwd.toUpperCase().startsWith(d + ":") || cwd === d) ? " on" : ""),
+            title: d + ":\\",
+            onClick: () => load(d + ":\\"),
+            children: d
+          },
+          d
+        )) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerCrumbs", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_pathPickerCrumb", onClick: () => load(""), children: T("preset.pickRoot") }),
+          crumbs.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_pathPickerCrumb", title: c.path, onClick: () => load(c.path), children: c.name }, c.path))
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerList", children: [
+          loading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_subEmpty", children: T("preset.pickLoading") }),
+          !loading && loadErr && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_presetErr", children: loadErr }),
+            cwd && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dsh-wt_subRow", onClick: () => load(parentPathOf(cwd)), children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subIcon", "aria-hidden": true, children: "\u2B06" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subName", children: T("preset.pickUp") })
+            ] })
+          ] }),
+          !loading && !loadErr && entries.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_subEmpty", children: T("preset.pickEmpty") }),
+          !loading && !loadErr && entries.map((e) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "button",
+            {
+              type: "button",
+              className: "dsh-wt_subRow",
+              title: e.path,
+              onClick: () => {
+                if (e.isDir) load(e.path);
+                else props.onPick(e.path);
+              },
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subIcon", "aria-hidden": true, children: e.isDir ? "\u{1F4C1}" : "\u{1F4C4}" }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subName", children: e.name }),
+                e.isDir && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subTag", children: T("preset.pickDirTag") })
+              ]
+            },
+            e.path
+          )),
+          !loading && !loadErr && truncated && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_pathPickerTrunc", children: T("preset.pickTruncated") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerFoot", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_pathPickerCwd", title: cwd, children: cwd || "\u2014" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerBtns", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+              "button",
+              {
+                type: "button",
+                className: "dsh-wt_pathPickerUp",
+                disabled: !cwd,
+                title: T("preset.pickUp"),
+                onClick: () => {
+                  if (cwd) load(parentPathOf(cwd));
+                },
+                children: [
+                  "\u2B06 ",
+                  T("preset.pickUp")
+                ]
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "dsh-wt_presetBtnPrimary",
+                disabled: !cwd,
+                onClick: () => {
+                  if (cwd) props.onPick(cwd);
+                },
+                children: T("preset.pickSelectDir")
+              }
+            )
+          ] })
+        ] })
+      ] })
+    ] }),
+    document.body
+  );
 }
 
 // node_modules/mdurl/index.mjs
