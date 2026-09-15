@@ -20868,7 +20868,7 @@ function PaneBody(props) {
         );
       }) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(PaneTabBody, { tab: tabs[active], row, index, paneTitle: pane.title, reloadKey: reloadKeys[tabs[active].id] ?? 0, barActions })
+    tabs.map((t, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: i === active ? { display: "contents" } : { display: "none" }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(PaneTabBody, { tab: t, row, index, paneTitle: pane.title, reloadKey: reloadKeys[t.id] ?? 0, barActions: i === active ? barActions : void 0 }) }, t.id))
   ] });
 }
 function PanePicker(props) {
@@ -21001,7 +21001,17 @@ function WorkspaceLayer(props) {
   const paneBottom = g.bottom;
   const topY = barTop + BAR_H;
   const renderPane = (it, row, index, x, y, h) => {
-    if (it.gone || it.pane.minimized) return null;
+    if (it.gone || it.pane.minimized) {
+      return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        "div",
+        {
+          className: "dsh-wt_pane dsh-wt_paneParked",
+          style: { position: "fixed", left: -1e5, top: -1e5, width: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none", zIndex: -1 },
+          children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(PaneBody, { pane: it.pane, row, index })
+        },
+        it.pane.id
+      );
+    }
     return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
       "div",
       {

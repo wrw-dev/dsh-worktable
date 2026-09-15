@@ -48,7 +48,7 @@ export type SplitPane = {
   tabs?: PaneTab[]
   /** 激活的标签下标 */
   active?: number
-  /** 窗格最小化：整窗收成一条窄占位，释放宽度给同行；点击占位条还原（窄条占位 + 让出空间） */
+  /** 窗格最小化：整窗让出空间收进标题栏恢复区；内容不卸载（移出视口保活），还原时原样恢复（网页不重载） */
   minimized?: boolean
   /** 窗格最大化：占满整个内容区（其他窗临时隐藏）；同一时刻至多一个窗格最大化 */
   maximized?: boolean
@@ -3314,7 +3314,13 @@ function PaneBody(props: { pane: SplitPane; row: PaneRow; index: number }) {
         )}
       </div>
       )}
-      <PaneTabBody tab={tabs[active]} row={row} index={index} paneTitle={pane.title} reloadKey={reloadKeys[tabs[active].id] ?? 0} barActions={barActions} />
+      {/* 全标签保活：非激活标签 display:none 藏起（iframe/网页会话不销毁，切回不重载）；
+          激活标签 display:contents 透传（布局与原先直接渲染一致）；仅激活标签带 barActions */}
+      {tabs.map((t, i) => (
+        <div key={t.id} style={i === active ? { display: 'contents' } : { display: 'none' }}>
+          <PaneTabBody tab={t} row={row} index={index} paneTitle={pane.title} reloadKey={reloadKeys[t.id] ?? 0} barActions={i === active ? barActions : undefined} />
+        </div>
+      ))}
     </>
   )
 }
@@ -3463,7 +3469,19 @@ function WorkspaceLayer(props: { spec: LayoutSpec; geom: Geom | null; chatW: num
   const topY = barTop + BAR_H
 
   const renderPane = (it: { pane: SplitPane; left: number; width: number; gone: boolean }, row: PaneRow, index: number, x: number, y: number, h: number) => {
-    if (it.gone || it.pane.minimized) return null
+    if (it.gone || it.pane.minimized) {
+      // 最小化/最大化让位窗格「保活」：移出视口并隐藏（不占布局、不可命中），内容仍挂载——
+      // 还原时同一 DOM 元素改回真实几何，iframe 不重载（K3Cloud 等网页登录态与已填信息不丢）
+      return (
+        <div
+          key={it.pane.id}
+          className="dsh-wt_pane dsh-wt_paneParked"
+          style={{ position: 'fixed', left: -100000, top: -100000, width: 0, height: 0, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }}
+        >
+          <PaneBody pane={it.pane} row={row} index={index} />
+        </div>
+      )
+    }
     return (
     <div
       key={it.pane.id}
