@@ -8124,7 +8124,7 @@ var css = xterm_default + "\n" + [
   ".dsh-wt_presetAdd{flex:none;margin-left:auto;padding:3px 10px;border:1px solid var(--dsw-alias-state-accent-primary,#4f8ef7);border-radius:6px;background:transparent;color:var(--dsw-alias-state-accent-primary,#4f8ef7);font:inherit;font-size:11px;line-height:16px;cursor:pointer}",
   ".dsh-wt_presetAdd:hover{background:var(--dsw-alias-fill-l1,rgba(255,255,255,.05))}",
   ".dsh-wt_presetList{flex:1;min-height:0;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}",
-  ".dsh-wt_presetCard{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:8px;background:var(--dsw-alias-fill-l1,rgba(255,255,255,.02))}",
+  ".dsh-wt_presetCard{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:8px;background:var(--dsw-alias-fill-l1,rgba(255,255,255,.02));cursor:grab}",
   ".dsh-wt_presetRow1{display:flex;align-items:center;gap:6px;min-width:0}",
   ".dsh-wt_presetIcon{flex:none;font-size:13px;line-height:1}",
   ".dsh-wt_presetName{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:var(--dsw-alias-label-primary,#e6e8eb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
@@ -8147,6 +8147,34 @@ var css = xterm_default + "\n" + [
   ".dsh-wt_presetToast{color:var(--dsw-alias-state-success,#3fb950)}",
   ".dsh-wt_presetWarn{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-warning,#e0a33c)}",
   ".dsh-wt_presetErr{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-danger,#f85149)}",
+  // 预置分组文件夹（v1.4）：面包屑层级导航 + 文件夹行 + 条目拖拽放置高亮
+  ".dsh-wt_presetCrumbs{flex:none;display:flex;align-items:center;gap:2px;padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,#262b36);overflow-x:auto;white-space:nowrap}",
+  ".dsh-wt_presetCrumb{flex:none;padding:2px 6px;border:none;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary,#9aa4b2);font:inherit;font-size:11px;line-height:16px;cursor:pointer}",
+  ".dsh-wt_presetCrumb:hover{color:var(--dsw-alias-label-primary,#e6e8eb);background:var(--dsw-alias-fill-l1,rgba(255,255,255,.06))}",
+  ".dsh-wt_presetCrumb.on{color:var(--dsw-alias-state-accent-primary,#4f8ef7)}",
+  ".dsh-wt_presetCrumbDrop{outline:1px dashed var(--dsw-alias-state-accent-primary,#4f8ef7);color:var(--dsw-alias-state-accent-primary,#4f8ef7)}",
+  ".dsh-wt_presetHeadBtns{flex:none;margin-left:auto;display:flex;gap:6px}",
+  ".dsh-wt_presetFolder{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:8px;background:var(--dsw-alias-fill-l1,rgba(255,255,255,.02));cursor:pointer}",
+  ".dsh-wt_presetFolder:hover{border-color:var(--dsw-alias-border-l2,#3a4150)}",
+  ".dsh-wt_presetFolderDrop{border-color:var(--dsw-alias-state-accent-primary,#4f8ef7);border-style:dashed;background:rgba(79,142,247,.08)}",
+  ".dsh-wt_presetCount{flex:none;min-width:16px;padding:0 5px;border-radius:8px;background:var(--dsw-alias-fill-l1,rgba(255,255,255,.06));color:var(--dsw-alias-label-tertiary,#6e7683);font-size:10px;line-height:16px;text-align:center}",
+  ".dsh-wt_presetCardDrag{opacity:.45}",
+  ".dsh-wt_presetDelDanger{color:var(--dsw-alias-state-danger,#f85149);border-color:var(--dsw-alias-state-danger,#f85149)}",
+  ".dsh-wt_folderModal{width:min(360px,calc(100vw - 32px))}",
+  ".dsh-wt_folderModalBody{display:flex;flex-direction:column;gap:10px;padding:12px}",
+  ".dsh-wt_folderModalBody .dsh-wt_pathPickerBtns{justify-content:flex-end}",
+  // 多账号：表单「账号/密码」行组（每行 = 账号 + 密码 + ✕）与账号选择弹层
+  ".dsh-wt_accRows{display:flex;flex-direction:column;gap:4px;min-width:0}",
+  ".dsh-wt_accRow{display:flex;align-items:center;gap:4px;min-width:0}",
+  ".dsh-wt_accRow .dsh-wt_customPathInput{flex:1;min-width:0;padding:4px 8px;font-size:11.5px;line-height:17px}",
+  ".dsh-wt_accDel{flex:none;width:22px;height:22px;padding:0;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary,#6e7683);font:inherit;font-size:11px;line-height:20px;cursor:pointer}",
+  ".dsh-wt_accDel:hover{color:var(--dsw-alias-state-danger,#f85149);border-color:var(--dsw-alias-state-danger,#f85149)}",
+  ".dsh-wt_accAdd{align-self:flex-start;padding:2px 8px;border:1px dashed var(--dsw-alias-border-l2,#3a4150);border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#9aa4b2);font:inherit;font-size:10.5px;line-height:16px;cursor:pointer}",
+  ".dsh-wt_accAdd:hover{color:var(--dsw-alias-state-accent-primary,#4f8ef7);border-color:var(--dsw-alias-state-accent-primary,#4f8ef7)}",
+  ".dsh-wt_accPick{width:min(360px,calc(100vw - 32px))}",
+  ".dsh-wt_accPickHint{margin:0;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1,#262b36)}",
+  ".dsh-wt_accPickRow{padding:7px 10px}",
+  ".dsh-wt_accPickMask{flex:none;font-size:11px;letter-spacing:.12em;color:var(--dsw-alias-label-tertiary,#6e7683)}",
   // 本地资源路径选择弹窗（portal 到 body + z-index 6000，压过窗格/标注/会话切换等一切层；
   // 视觉沿用 confirm 系列克制风格）
   ".dsh-wt_presetBrowse{flex:none;width:26px;height:26px;padding:0;border:1px solid var(--dsw-alias-border-l1,#262b36);border-radius:6px;background:transparent;font:inherit;font-size:13px;line-height:1;cursor:pointer}",
@@ -8588,10 +8616,16 @@ var zh = {
   "preset.namePhDir": "\u4F8B\u5982\uFF1A\u7D20\u6750\u5E93",
   "preset.url": "\u94FE\u63A5\u5730\u5740",
   "preset.urlPh": "\u4F8B\u5982\uFF1Ahttps://admin.example.com/login",
-  "preset.account": "\u767B\u5F55\u8D26\u53F7\uFF08\u9009\u586B\uFF09",
+  "preset.account": "\u767B\u5F55\u8D26\u53F7\uFF08\u53EF\u5B58\u591A\u7EC4\uFF0C\u9009\u586B\uFF09",
   "preset.accountPh": "\u7528\u4E8E\u5206\u680F\u6253\u5F00\u65F6\u81EA\u52A8\u586B\u5165\u767B\u5F55\u9875",
   "preset.password": "\u767B\u5F55\u5BC6\u7801\uFF08\u9009\u586B\uFF09",
   "preset.passwordPh": "\u6DF7\u6DC6\u5B58\u50A8\uFF1B\u5217\u8868\u63A9\u7801\uFF0C\u7F16\u8F91\u65F6\u53EF\u89C1",
+  "preset.addAccount": "\uFF0B \u6DFB\u52A0\u8D26\u53F7",
+  "preset.removeAccount": "\u5220\u9664\u8FD9\u7EC4\u8D26\u53F7",
+  "preset.pickAccountTitle": "\u9009\u62E9\u767B\u5F55\u8D26\u53F7",
+  "preset.pickAccountCopyHint": "\u590D\u5236\u524D\u5148\u9009\u62E9\u662F\u54EA\u4E00\u7EC4\u8D26\u53F7",
+  "preset.multiAccounts": "{n} \u7EC4\u8D26\u53F7\uFF08\u6253\u5F00/\u590D\u5236\u65F6\u9009\u62E9\uFF09",
+  "preset.accountNoUser": "\u672A\u586B\u8D26\u53F7",
   "preset.dir": "\u672C\u5730\u8D44\u6E90\u8DEF\u5F84",
   "preset.dirPh": "\u4F8B\u5982\uFF1AD:\\assets\\tpl\u3001C:\\docs\\README.md \u6216 /home/me/docs",
   "preset.note": "\u5907\u6CE8",
@@ -8624,6 +8658,18 @@ var zh = {
   "preset.pickEmpty": "\u6B64\u76EE\u5F55\u4E3A\u7A7A",
   "preset.pickErr": "\u76EE\u5F55\u8BFB\u53D6\u5931\u8D25\uFF08\u53EF\u80FD\u4E0D\u5B58\u5728\u6216\u65E0\u6743\u9650\uFF09",
   "preset.pickTruncated": "\u6761\u76EE\u8FC7\u591A\uFF0C\u4EC5\u663E\u793A\u524D 500 \u9879",
+  "preset.folderAdd": "\uFF0B \u6587\u4EF6\u5939",
+  "preset.folderRoot": "\u6839\u76EE\u5F55",
+  "preset.folderEmpty": "\u6B64\u6587\u4EF6\u5939\u4E3A\u7A7A\u3002\u70B9\u300C\uFF0B \u65B0\u589E\u6761\u76EE\u300D\u6DFB\u52A0\uFF0C\u6216\u628A\u5176\u4ED6\u4F4D\u7F6E\u7684\u6761\u76EE\u62D6\u8FDB\u6765\u3002",
+  "preset.folderNewTitle": "\u65B0\u5EFA\u6587\u4EF6\u5939",
+  "preset.folderRenameTitle": "\u91CD\u547D\u540D\u6587\u4EF6\u5939",
+  "preset.folderNamePh": "\u6587\u4EF6\u5939\u540D\u79F0\uFF0C\u4F8B\u5982\uFF1A\u9879\u76EEA",
+  "preset.folderRename": "\u91CD\u547D\u540D\u6587\u4EF6\u5939",
+  "preset.folderDel": "\u5220\u9664\u6587\u4EF6\u5939\uFF08\u8FDE\u5E26\u5185\u90E8\u5168\u90E8\u5185\u5BB9\uFF09",
+  "preset.folderDelConfirm": "\u5220\u9664\uFF08\u542B {n} \u9879\uFF09\uFF1F",
+  "preset.folderCount": "\u5171 {n} \u9879\uFF08\u542B\u5B50\u6587\u4EF6\u5939\u4E0E\u6761\u76EE\uFF09",
+  "preset.folderOf": "\u6240\u5C5E\u6587\u4EF6\u5939",
+  "preset.movedTo": "\u5DF2\u79FB\u52A8\u5230\u300C{name}\u300D",
   "custom.title": "\u81EA\u5B9A\u4E49\u8FD9\u4E2A\u7A97\u53E3",
   "custom.hint": "\u53D1\u9001\u540E\u5C06\u81EA\u52A8\u65B0\u5EFA\u4E00\u4E2A\u4F1A\u8BDD\uFF0C\u4E13\u95E8\u8D1F\u8D23\u8FD9\u4E2A\u7A97\u53E3\u7684\u81EA\u5B9A\u4E49\u8BBE\u8BA1\u3002",
   "custom.placeholder": "\u544A\u8BC9 AI \u4F60\u60F3\u8BA9\u8FD9\u4E2A\u7A97\u53E3\u505A\u4EC0\u4E48\uFF0C\u4F8B\u5982\uFF1A\u505A\u4E00\u4E2A\u5C55\u793A\u6211\u65C5\u884C\u8DB3\u8FF9\u7684\u65F6\u95F4\u7EBF\u9875\u9762\u2026",
@@ -8872,10 +8918,16 @@ var en = {
   "preset.namePhDir": "e.g. Assets",
   "preset.url": "URL",
   "preset.urlPh": "e.g. https://admin.example.com/login",
-  "preset.account": "Account (optional)",
+  "preset.account": "Account (multiple allowed, optional)",
   "preset.accountPh": "Auto-filled on split-pane open",
   "preset.password": "Password (optional)",
   "preset.passwordPh": "Obfuscated; masked in list, visible when editing",
+  "preset.addAccount": "\uFF0B Add account",
+  "preset.removeAccount": "Remove this account",
+  "preset.pickAccountTitle": "Choose an account",
+  "preset.pickAccountCopyHint": "Pick which account to copy first",
+  "preset.multiAccounts": "{n} accounts (pick on open/copy)",
+  "preset.accountNoUser": "(no username)",
   "preset.dir": "Local path",
   "preset.dirPh": "e.g. D:\\assets\\tpl, C:\\docs\\README.md or /home/me/docs",
   "preset.note": "Note",
@@ -8908,6 +8960,18 @@ var en = {
   "preset.pickEmpty": "This folder is empty",
   "preset.pickErr": "Failed to read the folder (missing or no access)",
   "preset.pickTruncated": "Too many entries \u2014 showing the first 500 only",
+  "preset.folderAdd": "\uFF0B Folder",
+  "preset.folderRoot": "Root",
+  "preset.folderEmpty": 'This folder is empty. Add entries with "\uFF0B Add entry", or drag entries in from elsewhere.',
+  "preset.folderNewTitle": "New folder",
+  "preset.folderRenameTitle": "Rename folder",
+  "preset.folderNamePh": "Folder name, e.g. Project A",
+  "preset.folderRename": "Rename folder",
+  "preset.folderDel": "Delete folder (with everything inside)",
+  "preset.folderDelConfirm": "Delete (with {n} items)?",
+  "preset.folderCount": "{n} items total (incl. subfolders & entries)",
+  "preset.folderOf": "Folder",
+  "preset.movedTo": 'Moved to "{name}"',
   "custom.title": "Customize this pane",
   "custom.hint": "Sending will create a new conversation dedicated to designing this pane.",
   "custom.placeholder": "Tell the AI what you want this pane to do, e.g. a timeline page of my travels\u2026",
@@ -9290,38 +9354,118 @@ function revealSecret(stored) {
 function maskSecret(stored) {
   return stored ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "";
 }
+function normalizeEntry(e) {
+  if (!e || typeof e.id !== "string" || e.kind !== "url" && e.kind !== "dir") return null;
+  let accounts = Array.isArray(e.accounts) ? e.accounts.filter((a) => a && typeof a === "object").map((a, i) => ({
+    id: typeof a.id === "string" && a.id ? a.id : "a" + i,
+    user: typeof a.user === "string" ? a.user : "",
+    secret: typeof a.secret === "string" ? a.secret : ""
+  })) : [];
+  if (accounts.length === 0 && (e.account || e.secret)) {
+    accounts = [{ id: "a0", user: typeof e.account === "string" ? e.account : "", secret: typeof e.secret === "string" ? e.secret : "" }];
+  }
+  return {
+    id: e.id,
+    kind: e.kind,
+    name: typeof e.name === "string" ? e.name : "",
+    url: typeof e.url === "string" ? e.url : "",
+    dirPath: typeof e.dirPath === "string" ? e.dirPath : "",
+    accounts,
+    note: typeof e.note === "string" ? e.note : "",
+    folderId: typeof e.folderId === "string" ? e.folderId : "",
+    openMode: e.openMode === "external" ? "external" : "split"
+  };
+}
+function normalizeFolder(f) {
+  if (!f || typeof f.id !== "string" || !f.id || typeof f.name !== "string") return null;
+  return { id: f.id, name: f.name, parentId: typeof f.parentId === "string" ? f.parentId : "" };
+}
 function loadPresets() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
+    if (!raw) return { entries: [], folders: [] };
     const v = JSON.parse(raw);
-    if (!Array.isArray(v)) return [];
-    return v.filter((e) => e && typeof e.id === "string" && (e.kind === "url" || e.kind === "dir"));
+    if (Array.isArray(v)) {
+      return { entries: v.map(normalizeEntry).filter((e) => !!e), folders: [] };
+    }
+    if (!v || typeof v !== "object") return { entries: [], folders: [] };
+    return {
+      entries: Array.isArray(v.entries) ? v.entries.map(normalizeEntry).filter((e) => !!e) : [],
+      folders: Array.isArray(v.folders) ? v.folders.map(normalizeFolder).filter((f) => !!f) : []
+    };
   } catch {
-    return [];
+    return { entries: [], folders: [] };
   }
 }
-function persist(list2) {
+function persist(store) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(list2));
+    localStorage.setItem(KEY, JSON.stringify(store));
   } catch {
   }
 }
 function savePreset(entry) {
-  const list2 = loadPresets();
-  const i = list2.findIndex((e) => e.id === entry.id);
-  if (i >= 0) list2[i] = entry;
-  else list2.push(entry);
-  persist(list2);
-  return list2;
+  const store = loadPresets();
+  const i = store.entries.findIndex((e) => e.id === entry.id);
+  if (i >= 0) store.entries[i] = entry;
+  else store.entries.push(entry);
+  persist(store);
+  return store;
 }
 function removePreset(id) {
-  const list2 = loadPresets().filter((e) => e.id !== id);
-  persist(list2);
-  return list2;
+  const store = loadPresets();
+  store.entries = store.entries.filter((e) => e.id !== id);
+  persist(store);
+  return store;
+}
+function movePreset(id, folderId) {
+  const store = loadPresets();
+  if (folderId && !store.folders.some((f) => f.id === folderId)) return store;
+  store.entries = store.entries.map((e) => e.id === id ? { ...e, folderId } : e);
+  persist(store);
+  return store;
+}
+function newFolderId() {
+  return "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+function addFolder(name, parentId) {
+  const store = loadPresets();
+  store.folders.push({ id: newFolderId(), name: name.trim(), parentId });
+  persist(store);
+  return store;
+}
+function renameFolder(id, name) {
+  const store = loadPresets();
+  store.folders = store.folders.map((f) => f.id === id ? { ...f, name: name.trim() || f.name } : f);
+  persist(store);
+  return store;
+}
+function folderSubtreeIds(folders, rootId) {
+  const ids = /* @__PURE__ */ new Set([rootId]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const f of folders) {
+      if (!ids.has(f.id) && ids.has(f.parentId)) {
+        ids.add(f.id);
+        grew = true;
+      }
+    }
+  }
+  return ids;
+}
+function removeFolderDeep(id) {
+  const store = loadPresets();
+  const doomed = folderSubtreeIds(store.folders, id);
+  store.folders = store.folders.filter((f) => !doomed.has(f.id));
+  store.entries = store.entries.filter((e) => !doomed.has(e.folderId));
+  persist(store);
+  return store;
 }
 function newPresetId() {
   return "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+function newAccountId() {
+  return "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 function autoName(kind, url, dirPath) {
   if (kind === "url") {
@@ -9387,14 +9531,72 @@ function normalizePresetUrl(raw) {
   }
 }
 function PresetsPane(props) {
-  const [list2, setList] = (0, import_react.useState)(() => loadPresets());
+  const [store, setStore] = (0, import_react.useState)(() => loadPresets());
+  const [cwd, setCwd] = (0, import_react.useState)("");
   const [editing, setEditing] = (0, import_react.useState)(null);
   const [confirmDel, setConfirmDel] = (0, import_react.useState)("");
+  const [confirmDelFolder, setConfirmDelFolder] = (0, import_react.useState)("");
+  const [folderModal, setFolderModal] = (0, import_react.useState)(null);
+  const [dragId, setDragId] = (0, import_react.useState)("");
+  const [dragOver, setDragOver] = (0, import_react.useState)("");
   const [toast, setToast] = (0, import_react.useState)("");
+  const [pick, setPick] = (0, import_react.useState)(null);
   const backToPicker = () => splitStore.closeTab(props.row, props.index, props.tabId);
   const flash = (msg) => {
     setToast(msg);
     window.setTimeout(() => setToast((m) => m === msg ? "" : m), 3500);
+  };
+  const withCred = (e) => e.accounts.filter((a) => a.user || a.secret);
+  const folderMap = new Map(store.folders.map((f) => [f.id, f]));
+  const crumbs = [];
+  {
+    let cur = cwd ? folderMap.get(cwd) : void 0;
+    let guard = 0;
+    while (cur && guard++ < 64) {
+      crumbs.unshift(cur);
+      cur = cur.parentId ? folderMap.get(cur.parentId) : void 0;
+    }
+  }
+  const subFolders = store.folders.filter((f) => f.parentId === cwd);
+  const curEntries = store.entries.filter((e) => (e.folderId || "") === cwd);
+  const deepItemCount = (id) => {
+    const ids = folderSubtreeIds(store.folders, id);
+    return store.folders.filter((f) => ids.has(f.id) && f.id !== id).length + store.entries.filter((e) => ids.has(e.folderId || "")).length;
+  };
+  const dropEntryTo = (folderId) => {
+    const id = dragId;
+    setDragId("");
+    setDragOver("");
+    if (!id) return;
+    const target = folderId ? folderMap.get(folderId) : null;
+    setStore(movePreset(id, folderId));
+    flash(T("preset.movedTo", { name: target ? target.name : T("preset.folderRoot") }));
+  };
+  const ROOT_KEY = "\xA7root";
+  const dropKeyOf = (folderId) => folderId || ROOT_KEY;
+  const dropProps = (folderId) => {
+    const key = dropKeyOf(folderId);
+    return {
+      onDragOver: (ev) => {
+        if (!dragId) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "move";
+        if (dragOver !== key) setDragOver(key);
+      },
+      onDragLeave: () => setDragOver((o) => o === key ? "" : o),
+      onDrop: (ev) => {
+        ev.preventDefault();
+        dropEntryTo(folderId);
+      }
+    };
+  };
+  const doOpenWithAccount = (url, acc) => {
+    const origin = originOfPreset(url);
+    if (origin && acc && (acc.user || acc.secret)) {
+      stagePresetFill(origin, acc.user, revealSecret(acc.secret));
+      flash(T("preset.fillHint"));
+    }
+    splitStore.reopenTab(props.row, props.index, { kind: "builtin", type: "browser", url });
   };
   const openEntry = (e) => {
     if (e.kind === "url") {
@@ -9407,12 +9609,12 @@ function PresetsPane(props) {
         window.open(ok, "_blank", "noopener");
         return;
       }
-      const origin = originOfPreset(ok);
-      if (origin && (e.account || e.secret)) {
-        stagePresetFill(origin, e.account, revealSecret(e.secret));
-        flash(T("preset.fillHint"));
+      const accs = withCred(e);
+      if (accs.length >= 2) {
+        setPick({ mode: "open", entry: e });
+        return;
       }
-      splitStore.openTab(props.row, props.index, { kind: "builtin", type: "browser", url: ok });
+      doOpenWithAccount(ok, accs[0] ?? null);
     } else {
       const p = e.dirPath.trim();
       if (!isAbs(p)) {
@@ -9439,18 +9641,34 @@ function PresetsPane(props) {
     if (!text2) return;
     try {
       await navigator.clipboard.writeText(text2);
-      flash(T("preset.copied") + "\uFF1A" + tag);
+      flash(T("preset.copied") + "\uFF1A" + (tag || "").trim());
     } catch {
       flash("\u2715 " + tag);
     }
+  };
+  const startCopy = (e, field) => {
+    const accs = withCred(e).filter((a) => field === "user" ? a.user : a.secret);
+    if (accs.length === 0) return;
+    const labelOf = (a) => a.user || "#" + (withCred(e).indexOf(a) + 1);
+    if (accs.length >= 2) {
+      setPick({
+        mode: "copy",
+        entry: e,
+        field,
+        onLabel: labelOf
+      });
+      return;
+    }
+    void copyText2(field === "user" ? accs[0].user : revealSecret(accs[0].secret), labelOf(accs[0]));
   };
   if (editing) {
     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
       PresetForm,
       {
         initial: editing === "new" ? null : editing,
+        folderId: cwd,
         onDone: (next) => {
-          setList(next);
+          setStore(next);
           setEditing(null);
         },
         onCancel: () => setEditing(null),
@@ -9475,70 +9693,308 @@ function PresetsPane(props) {
         "\u{1F4CC} ",
         T("pane.presets")
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetAdd", onClick: () => setEditing("new"), children: T("preset.add") })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetHeadBtns", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: () => setFolderModal("new"), children: T("preset.folderAdd") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetAdd", onClick: () => setEditing("new"), children: T("preset.add") })
+      ] })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetCrumbs", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "button",
+        {
+          type: "button",
+          className: "dsh-wt_presetCrumb" + (cwd === "" ? " on" : "") + (dragOver === ROOT_KEY ? " dsh-wt_presetCrumbDrop" : ""),
+          onClick: () => setCwd(""),
+          ...dropProps(""),
+          children: T("preset.folderRoot")
+        }
+      ),
+      crumbs.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+        "button",
+        {
+          type: "button",
+          className: "dsh-wt_presetCrumb" + (cwd === c.id ? " on" : "") + (dragOver === dropKeyOf(c.id) ? " dsh-wt_presetCrumbDrop" : ""),
+          title: c.name,
+          onClick: () => setCwd(c.id),
+          ...dropProps(c.id),
+          children: [
+            "\u203A ",
+            c.name
+          ]
+        },
+        c.id
+      ))
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetList", children: [
-      list2.length === 0 && !toast && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_presetHint", children: T("preset.empty") }),
-      list2.map((e) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetCard", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetRow1", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetIcon", "aria-hidden": true, children: e.kind === "url" ? "\u{1F310}" : "\u{1F4C1}" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetName", title: e.name, children: e.name || autoName(e.kind, e.url, e.dirPath) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "span",
-            {
-              className: "dsh-wt_presetBadge" + (e.openMode === "external" ? " dsh-wt_presetBadgeExt" : ""),
-              title: e.openMode === "split" ? T("preset.modeSplit") : T("preset.modeExternal"),
-              children: e.openMode === "split" ? T("preset.modeSplit") : T("preset.modeExternal")
-            }
-          )
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_presetTarget", title: e.kind === "url" ? e.url : e.dirPath, children: e.kind === "url" ? e.url : e.dirPath }),
-        e.kind === "url" && (e.account || e.secret) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetRow1", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetSecret", children: e.account ? e.account + " / " + maskSecret(e.secret) : maskSecret(e.secret) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetCopy", disabled: !e.account, title: T("preset.copyAccount"), onClick: () => copyText2(e.account, T("preset.copyAccount")), children: T("preset.copyAccount") }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetCopy", disabled: !e.secret, title: T("preset.copyPassword"), onClick: () => copyText2(revealSecret(e.secret), T("preset.copyPassword")), children: T("preset.copyPassword") })
-        ] }),
-        e.note && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_presetNote", title: e.note, children: e.note }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetActs", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtnPrimary", onClick: () => openEntry(e), children: T("preset.open") }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: () => setEditing(e), children: T("preset.edit") }),
-          confirmDel === e.id ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-            "button",
-            {
-              type: "button",
-              className: "dsh-wt_presetBtn dsh-wt_presetBtnDanger",
-              onClick: () => {
-                setList(removePreset(e.id));
-                setConfirmDel("");
-              },
-              children: [
-                T("preset.del"),
-                "?"
-              ]
-            }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: () => {
-            setConfirmDel(e.id);
-            window.setTimeout(() => setConfirmDel((c) => c === e.id ? "" : c), 3e3);
-          }, children: T("preset.del") })
-        ] })
-      ] }, e.id)),
+      subFolders.length === 0 && curEntries.length === 0 && !toast && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_presetHint", children: cwd === "" ? T("preset.empty") : T("preset.folderEmpty") }),
+      subFolders.map((f) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+        "div",
+        {
+          className: "dsh-wt_presetFolder" + (dragOver === dropKeyOf(f.id) ? " dsh-wt_presetFolderDrop" : ""),
+          onClick: () => setCwd(f.id),
+          ...dropProps(f.id),
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetIcon", "aria-hidden": true, children: "\u{1F4C1}" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetName", title: f.name, children: f.name }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetCount", title: T("preset.folderCount", { n: String(deepItemCount(f.id)) }), children: deepItemCount(f.id) }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "dsh-wt_presetCopy",
+                title: T("preset.folderRename"),
+                onClick: (ev) => {
+                  ev.stopPropagation();
+                  setFolderModal(f);
+                },
+                children: "\u270E"
+              }
+            ),
+            confirmDelFolder === f.id ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "dsh-wt_presetCopy dsh-wt_presetDelDanger",
+                title: T("preset.folderDel"),
+                onClick: (ev) => {
+                  ev.stopPropagation();
+                  setStore(removeFolderDeep(f.id));
+                  setConfirmDelFolder("");
+                },
+                children: T("preset.folderDelConfirm", { n: String(deepItemCount(f.id)) })
+              }
+            ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "dsh-wt_presetCopy",
+                title: T("preset.folderDel"),
+                onClick: (ev) => {
+                  ev.stopPropagation();
+                  setConfirmDelFolder(f.id);
+                  window.setTimeout(() => setConfirmDelFolder((c) => c === f.id ? "" : c), 3e3);
+                },
+                children: "\u{1F5D1}"
+              }
+            )
+          ]
+        },
+        f.id
+      )),
+      curEntries.map((e) => {
+        const accs = withCred(e);
+        const single = accs.length === 1 ? accs[0] : null;
+        return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
+          {
+            className: "dsh-wt_presetCard" + (dragId === e.id ? " dsh-wt_presetCardDrag" : ""),
+            draggable: true,
+            onDragStart: (ev) => {
+              setDragId(e.id);
+              ev.dataTransfer.effectAllowed = "move";
+              ev.dataTransfer.setData("text/plain", e.id);
+            },
+            onDragEnd: () => {
+              setDragId("");
+              setDragOver("");
+            },
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetRow1", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetIcon", "aria-hidden": true, children: e.kind === "url" ? "\u{1F310}" : "\u{1F4C1}" }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_presetName", title: e.name, children: e.name || autoName(e.kind, e.url, e.dirPath) }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "span",
+                  {
+                    className: "dsh-wt_presetBadge" + (e.openMode === "external" ? " dsh-wt_presetBadgeExt" : ""),
+                    title: e.openMode === "split" ? T("preset.modeSplit") : T("preset.modeExternal"),
+                    children: e.openMode === "split" ? T("preset.modeSplit") : T("preset.modeExternal")
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_presetTarget", title: e.kind === "url" ? e.url : e.dirPath, children: e.kind === "url" ? e.url : e.dirPath }),
+              accs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetRow1", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "span",
+                  {
+                    className: "dsh-wt_presetSecret",
+                    title: single ? (single.user || "\u2014") + " / " + (single.secret ? maskSecret(single.secret) : "\u2014") : accs.map((a) => a.user || "\u2014").join("\u3001"),
+                    children: single ? single.user ? single.user + " / " + maskSecret(single.secret) : maskSecret(single.secret) : T("preset.multiAccounts", { n: String(accs.length) })
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetCopy", disabled: !accs.some((a) => a.user), title: T("preset.copyAccount"), onClick: () => startCopy(e, "user"), children: T("preset.copyAccount") }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetCopy", disabled: !accs.some((a) => a.secret), title: T("preset.copyPassword"), onClick: () => startCopy(e, "pass"), children: T("preset.copyPassword") })
+              ] }),
+              e.note && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_presetNote", title: e.note, children: e.note }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_presetActs", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtnPrimary", onClick: () => openEntry(e), children: T("preset.open") }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: () => setEditing(e), children: T("preset.edit") }),
+                confirmDel === e.id ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "dsh-wt_presetBtn dsh-wt_presetBtnDanger",
+                    onClick: () => {
+                      setStore(removePreset(e.id));
+                      setConfirmDel("");
+                    },
+                    children: [
+                      T("preset.del"),
+                      "?"
+                    ]
+                  }
+                ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: () => {
+                  setConfirmDel(e.id);
+                  window.setTimeout(() => setConfirmDel((c) => c === e.id ? "" : c), 3e3);
+                }, children: T("preset.del") })
+              ] })
+            ]
+          },
+          e.id
+        );
+      }),
       toast && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_presetToast", children: toast })
-    ] })
+    ] }),
+    folderModal && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      FolderNameModal,
+      {
+        title: folderModal === "new" ? T("preset.folderNewTitle") : T("preset.folderRenameTitle"),
+        initial: folderModal === "new" ? "" : folderModal.name,
+        onSubmit: (name) => {
+          const cur = folderModal;
+          setFolderModal(null);
+          const trimmed = name.trim();
+          if (!trimmed) return;
+          setStore(cur === "new" ? addFolder(trimmed, cwd) : renameFolder(cur.id, trimmed));
+        },
+        onClose: () => setFolderModal(null)
+      }
+    ),
+    pick && (pick.mode === "open" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      AccountPickerModal,
+      {
+        accounts: withCred(pick.entry),
+        title: T("preset.pickAccountTitle"),
+        onPick: (a) => {
+          const entry = pick.entry;
+          setPick(null);
+          const ok = normalizePresetUrl(entry.url);
+          if (!ok) {
+            flash(T("preset.errUrl"));
+            return;
+          }
+          doOpenWithAccount(ok, a);
+        },
+        onClose: () => setPick(null)
+      }
+    ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      AccountPickerModal,
+      {
+        accounts: withCred(pick.entry).filter((a) => pick.field === "user" ? a.user : a.secret),
+        title: T("preset.pickAccountTitle"),
+        hint: T("preset.pickAccountCopyHint"),
+        onPick: (a) => {
+          const field = pick.field;
+          const onLabel = pick.onLabel;
+          setPick(null);
+          const tag = onLabel ? onLabel(a) : a.user || "";
+          void copyText2(field === "user" ? a.user : revealSecret(a.secret), tag);
+        },
+        onClose: () => setPick(null)
+      }
+    ))
   ] });
+}
+function AccountPickerModal(props) {
+  return (0, import_react_dom.createPortal)(
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_pathPickerBackdrop", onClick: props.onClose }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPicker dsh-wt_accPick", role: "dialog", "aria-label": props.title, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerHead", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_pathPickerTitle", children: props.title }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBack", title: T("preset.cancel"), "aria-label": T("preset.cancel"), onClick: props.onClose, children: "\u2715" })
+        ] }),
+        props.hint && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dsh-wt_presetHint dsh-wt_accPickHint", children: props.hint }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_pathPickerList", children: props.accounts.map((a, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dsh-wt_subRow dsh-wt_accPickRow", onClick: () => props.onPick(a), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subIcon", "aria-hidden": true, children: "\u{1F464}" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_subName", children: a.user || T("preset.accountNoUser") + " #" + (i + 1) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_accPickMask", children: a.secret ? maskSecret(a.secret) : "\u2014" })
+        ] }, a.id)) })
+      ] })
+    ] }),
+    document.body
+  );
+}
+function FolderNameModal(props) {
+  const [name, setName] = (0, import_react.useState)(props.initial);
+  const inputRef = (0, import_react.useRef)(null);
+  (0, import_react.useEffect)(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+  return (0, import_react_dom.createPortal)(
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dsh-wt_pathPickerBackdrop", onClick: props.onClose }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPicker dsh-wt_folderModal", role: "dialog", "aria-label": props.title, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerHead", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_pathPickerTitle", children: props.title }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBack", title: T("preset.cancel"), "aria-label": T("preset.cancel"), onClick: props.onClose, children: "\u2715" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_folderModalBody", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "input",
+            {
+              ref: inputRef,
+              className: "dsh-wt_customPathInput",
+              placeholder: T("preset.folderNamePh"),
+              value: name,
+              onChange: (e) => setName(e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") props.onSubmit(name);
+              }
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_pathPickerBtns", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtn", onClick: props.onClose, children: T("preset.cancel") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_presetBtnPrimary", onClick: () => props.onSubmit(name), children: T("preset.save") })
+          ] })
+        ] })
+      ] })
+    ] }),
+    document.body
+  );
 }
 function PresetForm(props) {
   const init = props.initial;
   const [kind, setKind] = (0, import_react.useState)(init?.kind ?? "url");
   const [name, setName] = (0, import_react.useState)(init?.name ?? "");
   const [url, setUrl] = (0, import_react.useState)(init?.url ?? "");
-  const [account, setAccount] = (0, import_react.useState)(init?.account ?? "");
-  const [pass, setPass] = (0, import_react.useState)(revealSecret(init?.secret ?? ""));
+  const [accounts, setAccounts] = (0, import_react.useState)(() => {
+    const rows = (init?.accounts ?? []).filter((a) => a.user || a.secret);
+    return rows.length > 0 ? rows : [{ id: newAccountId(), user: "", secret: "" }];
+  });
   const [dirPath, setDirPath] = (0, import_react.useState)(init?.dirPath ?? "");
   const [note, setNote] = (0, import_react.useState)(init?.note ?? "");
   const [openMode, setOpenMode] = (0, import_react.useState)(init?.openMode ?? "split");
+  const [folderId, setFolderId] = (0, import_react.useState)(init ? init.folderId || "" : props.folderId || "");
   const [err, setErr] = (0, import_react.useState)("");
+  const folderRows = (() => {
+    const folders = loadPresets().folders;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    return folders.map((f) => {
+      let cur = f;
+      let depth = 0;
+      while (cur.parentId && byId.has(cur.parentId) && depth < 64) {
+        cur = byId.get(cur.parentId);
+        depth++;
+      }
+      return { id: f.id, name: f.name, depth };
+    });
+  })();
   const [warn, setWarn] = (0, import_react.useState)("");
   const [pickerOpen, setPickerOpen] = (0, import_react.useState)(false);
+  const updateAcc = (id, patch) => setAccounts((rows) => rows.map((a) => a.id === id ? { ...a, ...patch } : a));
+  const removeAcc = (id) => setAccounts((rows) => rows.filter((a) => a.id !== id));
+  const addAcc = () => setAccounts((rows) => [...rows, { id: newAccountId(), user: "", secret: "" }]);
   (0, import_react.useEffect)(() => {
     if (kind !== "dir" || !dirPath.trim() || !isAbs(dirPath.trim())) {
       setWarn("");
@@ -9570,9 +10026,9 @@ function PresetForm(props) {
         kind,
         name: name.trim(),
         url: ok,
-        account: account.trim(),
-        secret: protectSecret(pass),
+        accounts: accounts.map((a) => ({ id: a.id, user: a.user.trim(), secret: a.secret })).filter((a) => a.user || a.secret),
         note: note.trim(),
+        folderId,
         openMode
       };
       props.onDone(savePreset(entry2));
@@ -9589,9 +10045,9 @@ function PresetForm(props) {
       name: name.trim(),
       url: "",
       dirPath: p,
-      account: "",
-      secret: "",
+      accounts: [],
       note: note.trim(),
+      folderId,
       openMode
     };
     props.onDone(savePreset(entry));
@@ -9658,6 +10114,21 @@ function PresetForm(props) {
         }
       )
     ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", children: T("preset.folderOf") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+        "select",
+        {
+          className: "dsh-wt_customPathInput",
+          value: folderId,
+          onChange: (e) => setFolderId(e.target.value),
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "", children: T("preset.folderRoot") }),
+            folderRows.map((f) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: f.id, children: "\u3000".repeat(f.depth) + f.name }, f.id))
+          ]
+        }
+      )
+    ] }),
     kind === "url" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", children: T("preset.url") }),
@@ -9671,32 +10142,45 @@ function PresetForm(props) {
           }
         )
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", children: T("preset.account") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          "input",
-          {
-            className: "dsh-wt_customPathInput",
-            placeholder: T("preset.accountPh"),
-            autoComplete: "off",
-            value: account,
-            onChange: (e) => setAccount(e.target.value)
-          }
-        )
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", children: T("preset.password") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          "input",
-          {
-            className: "dsh-wt_customPathInput",
-            type: "password",
-            placeholder: T("preset.passwordPh"),
-            autoComplete: "new-password",
-            value: pass,
-            onChange: (e) => setPass(e.target.value)
-          }
-        )
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", style: { alignItems: "flex-start" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dsh-wt_customLabel", style: { paddingTop: 6 }, children: T("preset.account") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_accRows", style: { flex: 1 }, children: [
+          accounts.map((a) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_accRow", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "input",
+              {
+                className: "dsh-wt_customPathInput",
+                placeholder: T("preset.accountPh"),
+                autoComplete: "off",
+                value: a.user,
+                onChange: (e) => updateAcc(a.id, { user: e.target.value })
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "input",
+              {
+                className: "dsh-wt_customPathInput",
+                type: "password",
+                placeholder: T("preset.passwordPh"),
+                autoComplete: "new-password",
+                value: revealSecret(a.secret),
+                onChange: (e) => updateAcc(a.id, { secret: protectSecret(e.target.value) })
+              }
+            ),
+            accounts.length > 1 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              "button",
+              {
+                type: "button",
+                className: "dsh-wt_accDel",
+                title: T("preset.removeAccount"),
+                "aria-label": T("preset.removeAccount"),
+                onClick: () => removeAcc(a.id),
+                children: "\u2715"
+              }
+            )
+          ] }, a.id)),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dsh-wt_accAdd", onClick: addAcc, children: T("preset.addAccount") })
+        ] })
       ] })
     ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dsh-wt_customRow", children: [
@@ -17753,6 +18237,10 @@ function setSplitT(fn) {
   uiT = fn;
 }
 var T = (key, params) => uiT ? uiT(key, params) : key;
+var reopenTick = /* @__PURE__ */ new Map();
+function reopenTickOf(tabId) {
+  return reopenTick.get(tabId) ?? 0;
+}
 var splitEnv = null;
 function setSplitEnv(env) {
   splitEnv = env;
@@ -18729,6 +19217,28 @@ var splitStore = {
       tabs.push(tab);
       return { ...pane, content: null, tabs, active: tabs.length - 1 };
     };
+    this.mutatePaneOpen(row, i, mutate);
+  },
+  reopenTab(row, i, content) {
+    const spec = this.spec;
+    if (!spec) return;
+    const mutate = (pane) => {
+      const tabs = [...pane.tabs ?? []];
+      const existing = tabs.findIndex((t) => sameContent(t.content, content));
+      if (existing >= 0) {
+        reopenTick.set(tabs[existing].id, (reopenTick.get(tabs[existing].id) ?? 0) + 1);
+        return { ...pane, content: null, tabs, active: existing };
+      }
+      const tab = { id: "t" + Date.now().toString(36), title: tabTitleOf(content), content };
+      tabs.push(tab);
+      return { ...pane, content: null, tabs, active: tabs.length - 1 };
+    };
+    this.mutatePaneOpen(row, i, mutate);
+  },
+  /** openTab/reopenTab 共用：按行列把窗格替换为 mutate 结果，落盘并通知 */
+  mutatePaneOpen(row, i, mutate) {
+    const spec = this.spec;
+    if (!spec) return;
     if (row === "left") {
       if (!spec.left || i !== 0) return;
       this.spec = { ...spec, left: mutate(spec.left) };
@@ -19057,11 +19567,20 @@ function BrowserPane(props) {
   const initial = props.content?.url || "https://example.com";
   const nav = useNavHistory(initial);
   const [url, setUrl] = (0, import_react2.useState)(initial);
+  const [reloadN, setReloadN] = (0, import_react2.useState)(() => props.reloadKey + reopenTickOf(props.tabId));
   const [src, setSrc] = (0, import_react2.useState)(initial);
   const iframeRef = (0, import_react2.useRef)(null);
   const navRef = (0, import_react2.useRef)(nav);
   navRef.current = nav;
   const embed = useEmbedSrc(src);
+  (0, import_react2.useEffect)(() => {
+    const n = props.reloadKey + reopenTickOf(props.tabId);
+    if (n !== reloadN) {
+      setReloadN(n);
+      setSrc(initial);
+      setUrl(initial);
+    }
+  }, [props.reloadKey, props.tabId]);
   const commit = (raw) => splitStore.setTabContent(props.row, props.index, props.tabId, { kind: "builtin", type: "browser", url: raw });
   const go = () => {
     const ok = normalizeAddressInput(url);
@@ -19088,12 +19607,17 @@ function BrowserPane(props) {
       commit(c);
     }
   };
+  const navSeenRef = (0, import_react2.useRef)(false);
+  const recaptureRef = (0, import_react2.useRef)(0);
+  const loadGenRef = (0, import_react2.useRef)(0);
   (0, import_react2.useEffect)(() => {
     const onMsg = (e) => {
       const d = e.data;
-      if (!d || d.__wt_nav !== true || typeof d.url !== "string") return;
+      if (!d || d.__wt_nav !== true && d.__wt_preset_fill !== true) return;
       const fw = iframeRef.current?.contentWindow;
       if (fw && e.source !== fw) return;
+      navSeenRef.current = true;
+      if (d.__wt_nav !== true || typeof d.url !== "string") return;
       const real = d.url;
       if (real && real !== navRef.current.cur) {
         navRef.current.go(real);
@@ -19105,6 +19629,18 @@ function BrowserPane(props) {
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, []);
+  const onFrameLoad = () => {
+    if (!embed.proxied) return;
+    navSeenRef.current = false;
+    const gen = ++loadGenRef.current;
+    window.setTimeout(() => {
+      if (gen !== loadGenRef.current) return;
+      if (navSeenRef.current) return;
+      if (recaptureRef.current >= 3) return;
+      recaptureRef.current += 1;
+      setReloadN((n) => n + 1);
+    }, 1500);
+  };
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "dsh-wt_browserBar", children: [
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "dsh-wt_browserGo dsh-wt_navBtn", title: T("pane.back"), "aria-label": T("pane.back"), disabled: !nav.canBack, onClick: doBack, children: "\u2190" }),
@@ -19129,7 +19665,7 @@ function BrowserPane(props) {
       props.barActions?.onRefresh && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "dsh-wt_browserGo", title: T("pane.refresh"), "aria-label": T("pane.refresh"), onClick: props.barActions.onRefresh, children: "\u21BB" }),
       props.barActions?.onClose && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "dsh-wt_browserGo", title: T("pane.closeTab"), "aria-label": T("pane.closeTab"), onClick: props.barActions.onClose, children: "\u2715" })
     ] }),
-    embed.src === null ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "dsh-wt_paneFrame", style: { display: "flex", alignItems: "center", justifyContent: "center", color: "#888", fontSize: 12 }, children: "\u8F7D\u5165\u4E2D\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("iframe", { ref: iframeRef, className: "dsh-wt_paneFrame", src: embed.src, title: "browser" }, props.reloadKey)
+    embed.src === null ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "dsh-wt_paneFrame", style: { display: "flex", alignItems: "center", justifyContent: "center", color: "#888", fontSize: 12 }, children: "\u8F7D\u5165\u4E2D\u2026" }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("iframe", { ref: iframeRef, className: "dsh-wt_paneFrame", src: embed.src, title: "browser", onLoad: onFrameLoad }, reloadN)
   ] });
 }
 function IframePane(props) {

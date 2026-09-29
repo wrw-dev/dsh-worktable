@@ -1,0 +1,6 @@
+{
+  "check": "POST hot-reload health probe",
+  "command": "Invoke-RestMethod http://127.0.0.1:3080/api/worktable/health",
+  "response": { "plugin": "dsh-worktable", "version": "0.3.6", "ok": true },
+  "context": "dev_clear_routes /api/worktable → dev_reload_package dsh-worktable（fiber before active → after active），client bundle 新代已生效"
+}

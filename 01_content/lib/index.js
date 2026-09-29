@@ -191,17 +191,65 @@ function injectNavNotifyScript(html, targetOrigin) {
   const script = "<script>(function(){var O=" + originJson + ';function r(){try{var p=location.pathname+location.search+location.hash;parent.postMessage({__wt_nav:true,url:O+p},"*")}catch(e){}}window.addEventListener("load",r);window.addEventListener("popstate",r);window.addEventListener("hashchange",r);try{var a=history.pushState,b=history.replaceState;history.pushState=function(){var x=a.apply(this,arguments);r();return x};history.replaceState=function(){var x=b.apply(this,arguments);r();return x}}catch(e){}function navTo(href){try{var u=new URL(href,location.href);if(u.protocol!=="http:"&&u.protocol!=="https:")return;if(u.origin===location.origin){if(u.href!==location.href)location.href=u.href;return;}parent.postMessage({__wt_nav:true,url:u.href,kind:"nav"},"*")}catch(e){}}try{document.addEventListener("click",function(ev){var el=ev.target&&ev.target.closest?ev.target.closest("a[href]"):null;if(!el)return;var t=(el.getAttribute("target")||"").toLowerCase();if(t!=="_blank"&&t!=="_new")return;ev.preventDefault();navTo(el.getAttribute("href"))},true)}catch(e){}try{var _o=window.open;window.open=function(u){try{if(u)navTo(u)}catch(e){}return null}}catch(e){}r()})()</script>';
   const i = html.toLowerCase().indexOf("</head>");
   const base = i >= 0 ? html.slice(0, i) + script + html.slice(i) : script + html;
-  const fill = presetFillStage.get(targetOrigin);
+  const fill = presetFillStage.get(targetOrigin) ?? (presetFillStage.size > 0 ? (() => {
+    const h = mirrorHostOf(targetOrigin);
+    for (const [k, v] of presetFillStage) {
+      if (mirrorHostOf(k) === h) return v;
+    }
+    return null;
+  })() : null);
   if (!fill) return base;
   const payload = JSON.stringify({ user: fill.user, pass: fill.pass });
-  const fillScript = "<script>(function(){var D=" + payload + `;var done=false;function native(el,v){try{var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(proto,"value");if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}))}catch(e){}}function guess(el){if(!el)return null;var v=(el.name||"")+" "+(el.id||"")+" "+(el.getAttribute("autocomplete")||"")+" "+(el.placeholder||"")+(el.getBoundingClientRect?Array.prototype.slice.call(el.labels||[]).map(function(l){return l.textContent||""}).join(" "):"");return v.toLowerCase()}function isPw(el){return !!el&&el.type==="password"}function userLike(s){return /user|email|account|login|name|phone|mobile|mail/.test(s)}function fill(){try{var f=null,inputs=document.querySelectorAll("input");var pw=null;for(var i=0;i<inputs.length;i++){var el=inputs[i];var t=(el.type||"").toLowerCase();if(t==="hidden"||el.disabled||el.readOnly||el.offsetParent===null)continue;if(t==="password"){pw=el;continue}if((t==="text"||t==="email"||t==="tel")&&!pw){var g=guess(el);if(g&&userLike(g)){f=el;break}}}if(!pw){var forms=document.querySelectorAll("form");for(var j=0;j<forms.length;j++){var p=forms[j].querySelector('input[type="password"]');if(p){pw=p;f=null;break}}}if(pw){var visible=function(el){return el&&el.offsetParent!==null};var target=null;if(visible(f))target=f;else{var form=pw.closest?pw.closest("form"):null;var cand=form?form.querySelectorAll("input"):document.querySelectorAll("input");for(var k=0;k<cand.length;k++){var ce=cand[k];var ct=(ce.type||"").toLowerCase();if(ct!=="text"&&ct!=="email"&&ct!=="tel")continue;if(ce===pw||ce.disabled||ce.readOnly||ce.offsetParent===null)continue;target=ce;break}}if(D.user&&target&&native(target,D.user),native(pw,D.pass),!done){done=true;try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}return true}return false}catch(e){return false}}if(fill())return;var n=0;var iv=setInterval(function(){n++;if(fill()||n>60){clearInterval(iv);if(n>60&&!done){try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}}},500);document.addEventListener("DOMContentLoaded",function(){if(!done)fill()})})()</script>`;
+  const fillScriptOpen = "<script>";
+  const fillBody = "(function(){var D=" + payload + ';var done=false,tries=0;function native(el,v){try{var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(proto,"value");if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));try{el.dispatchEvent(new KeyboardEvent("keyup",{bubbles:true}))}catch(e){}}catch(e){}}function guess(el){if(!el)return "";var v=(el.name||"")+" "+(el.id||"")+" "+(el.getAttribute("autocomplete")||"")+" "+(el.placeholder||"")+(el.getBoundingClientRect?Array.prototype.slice.call(el.labels||[]).map(function(l){return l.textContent||""}).join(" "):"");return v.toLowerCase()}function userLike(s){return /user|email|account|login|name|phone|mobile|mail|\u7528\u6237|\u8D26\u53F7|\u5E10\u53F7|\u8D26\u6237|\u624B\u673A|\u90AE\u7BB1/.test(s)}function visible(el){if(!el||el.disabled)return false;var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var st=getComputedStyle(el);if(st.visibility==="hidden"||st.display==="none")return false;var n=el;while(n&&n.nodeType===1){if(n.clientWidth===0&&n.clientHeight===0&&getComputedStyle(n).overflow!=="visible")return false;n=n.parentElement}return true}function anyVisible(){var inputs=document.querySelectorAll("input");var best=null;for(var i=0;i<inputs.length;i++){var el=inputs[i];var t=(el.type||"").toLowerCase();if(t!=="text"&&t!=="email"&&t!=="tel")continue;if(el.disabled)continue;if(!visible(el))continue;best=el}return best}function fillOnce(first){try{var pw=null,inputs=document.querySelectorAll("input");for(var i=0;i<inputs.length;i++){var el=inputs[i];var t=(el.type||"").toLowerCase();if(t==="hidden"||el.disabled)continue;if(!visible(el))continue;if(t==="password"){pw=el;break}}if(!pw)return false;var f=null;var form=pw.closest?pw.closest("form"):null;var cand=form?form.querySelectorAll("input"):inputs;for(var j=0;j<cand.length;j++){var ce=cand[j];var ct=(ce.type||"").toLowerCase();if((ct!=="text"&&ct!=="email"&&ct!=="tel")||ce===pw||ce.disabled)continue;if(!visible(ce))continue;var g=guess(ce);if(g&&userLike(g)){f=ce;break}}if(!f){var gb=anyVisible();if(gb&&gb!==pw)f=gb}function put(el,v){if(!el)return;var cur=el.value;if(cur===v)return;if(!first&&(cur!==""||el===document.activeElement))return;native(el,v)}put(pw,D.pass);if(D.user)put(f,D.user);if(!done){done=true;try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}return true}catch(e){return false}}if(fillOnce(true)){}var iv=setInterval(function(){tries++;if(tries>60){clearInterval(iv);return}fillOnce(false)},500);document.addEventListener("DOMContentLoaded",function(){fillOnce(tries===0)})})()';
   const j = base.toLowerCase().lastIndexOf("</body>");
-  return j >= 0 ? base.slice(0, j) + fillScript + base.slice(j) : base + fillScript;
+  return j >= 0 ? base.slice(0, j) + fillScriptOpen + fillBody + "</script>" : base + fillScriptOpen + fillBody + "</script>";
 }
 var embedProxies = /* @__PURE__ */ new Map();
 var EMBED_PROXY_MAX = 8;
 var EMBED_PROXY_IDLE_MS = 60 * 60 * 1e3;
-async function embedForward(clientReq, clientRes, targetOrigin) {
+var cookieMirror = /* @__PURE__ */ new Map();
+function mirrorHostOf(origin) {
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return origin;
+  }
+}
+function mirrorCapture(host, setCookies) {
+  if (!host || !setCookies || setCookies.length === 0) return;
+  let bucket = cookieMirror.get(host);
+  if (!bucket) {
+    bucket = /* @__PURE__ */ new Map();
+    cookieMirror.set(host, bucket);
+  }
+  for (const sc of setCookies) {
+    const pair = sc.split(";")[0] ?? "";
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const name2 = pair.slice(0, eq).trim();
+    if (!name2) continue;
+    bucket.set(name2, pair);
+  }
+}
+function mirrorMerge(host, existing) {
+  const bucket = cookieMirror.get(host);
+  if (!bucket || bucket.size === 0) return null;
+  const have = /* @__PURE__ */ new Set();
+  const parts = [];
+  if (existing) {
+    for (const p of existing.split(";")) {
+      const t = p.trim();
+      if (!t) continue;
+      const eq = t.indexOf("=");
+      if (eq > 0) have.add(t.slice(0, eq).trim());
+      parts.push(t);
+    }
+  }
+  for (const [name2, pair] of bucket) if (!have.has(name2)) parts.push(pair);
+  return parts.length ? parts.join("; ") : null;
+}
+async function embedForward(clientReq, clientRes, targetOrigin, ctx) {
   const u = new URL(clientReq.url ?? "/", targetOrigin);
   const inHeaders = {};
   for (const [k, v] of Object.entries(clientReq.headers)) {
@@ -209,8 +257,11 @@ async function embedForward(clientReq, clientRes, targetOrigin) {
     if (v !== void 0) inHeaders[k] = Array.isArray(v) ? v.join(", ") : String(v);
   }
   inHeaders.referer = targetOrigin + "/";
-  const cookieHeader = clientReq.headers.cookie;
-  if (typeof cookieHeader === "string" && cookieHeader) inHeaders.cookie = cookieHeader;
+  const mh = mirrorHostOf(targetOrigin);
+  const rawCookie = clientReq.headers.cookie;
+  const mergedCookie = mirrorMerge(mh, typeof rawCookie === "string" ? rawCookie : void 0);
+  if (mergedCookie) inHeaders.cookie = mergedCookie;
+  else if (typeof rawCookie === "string" && rawCookie) inHeaders.cookie = rawCookie;
   const init = { method: clientReq.method, headers: inHeaders, redirect: "manual", signal: AbortSignal.timeout(3e4) };
   if (clientReq.method !== "GET" && clientReq.method !== "HEAD") {
     const chunks = [];
@@ -242,10 +293,18 @@ async function embedForward(clientReq, clientRes, targetOrigin) {
   if (typeof upstream.headers.getSetCookie === "function") {
     setCookies = upstream.headers.getSetCookie().map(embedRewriteSetCookie);
   }
+  mirrorCapture(mh, setCookies);
   const loc = upstream.headers.get("location");
   if (loc && upstream.status >= 300 && upstream.status < 400) {
     try {
-      outHeaders.location = new URL(loc, u.href).href.replace(targetOrigin, `http://127.0.0.1:${clientReq.__embedPort}`);
+      const dest = new URL(loc, u.href);
+      const srcHost = new URL(targetOrigin).hostname;
+      if (dest.hostname === srcHost && dest.origin !== targetOrigin && ctx) {
+        const destProxyRoot = await ensureEmbedProxy(ctx, dest.origin);
+        outHeaders.location = destProxyRoot + dest.pathname + dest.search + dest.hash;
+      } else {
+        outHeaders.location = new URL(loc, u.href).href.replace(targetOrigin, `http://127.0.0.1:${clientReq.__embedPort}`);
+      }
     } catch {
     }
   }
@@ -296,7 +355,7 @@ function ensureEmbedProxy(ctx, targetOrigin) {
         ep.lastUsed = Date.now();
         req.__embedPort = ep.port;
       }
-      embedForward(req, res, key).catch(() => {
+      embedForward(req, res, key, ctx).catch(() => {
         try {
           res.end();
         } catch {
@@ -796,7 +855,11 @@ function apply(ctx) {
         }
         const body = await readJsonBody(req);
         const origin = typeof body.origin === "string" ? originOf(body.origin) : null;
-        if (origin) presetFillStage.delete(origin);
+        if (origin) {
+          presetFillStage.delete(origin);
+          const h = mirrorHostOf(origin);
+          for (const k of [...presetFillStage.keys()]) if (mirrorHostOf(k) === h) presetFillStage.delete(k);
+        }
         json(res, 200, { ok: true });
       } catch (err) {
         json(res, 500, { ok: false, error: String(err) });
@@ -952,8 +1015,10 @@ function apply(ctx) {
   });
   setupTerminal(webServer, ctx);
 }
+var __testHooks = { injectNavNotifyScript, embedRewriteSetCookie, mirrorCapture, mirrorMerge, mirrorHostOf, embedProxies };
 export {
   HEALTH_PATH,
+  __testHooks,
   __wtLoadProbeStats,
   apply,
   inject,
