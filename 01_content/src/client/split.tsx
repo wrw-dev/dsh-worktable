@@ -133,6 +133,10 @@ type SplitState = {
   /** 最大化/还原窗格（true = 独占内容区；单选语义：最大化 B 时自动还原 A） */
   setPaneMaximized(row: PaneRow, i: number, maximized: boolean): void
   openTab(row: PaneRow, i: number, content: SplitContent): void
+  /** 同 openTab，但同内容标签已存在时强制重载该标签的 iframe（再次打开预置链接 = 全新登录页） */
+  reopenTab(row: PaneRow, i: number, content: SplitContent): void
+  /** openTab/reopenTab 共用：按行列把窗格替换为 mutate 结果，落盘并通知 */
+  mutatePaneOpen(row: PaneRow, i: number, mutate: (pane: SplitPane) => SplitPane): void
   /** 锁定窗格：清空原有标签，把内容作为该窗唯一的固定标签（挂载产物的「锁死」语义） */
   lockPane(row: PaneRow, i: number, content: SplitContent): void
   closeTab(row: PaneRow, i: number, tabId: string): void
@@ -223,6 +227,13 @@ export function setSplitT(fn: ((key: string, params?: Record<string, string>) =>
   uiT = fn
 }
 export const T = (key: string, params?: Record<string, string>): string => (uiT ? uiT(key, params) : key)
+
+/** 强制重载计数（reopenTab 用）：tabId → 递增序号，PaneTabBody 透传为 iframe key（key 变 = 重挂载） */
+const reopenTick = new Map<string, number>()
+/** PaneTabBody/BrowserPane 读取：reopenTab 累加过的次数（参与 iframe key 计算） */
+export function reopenTickOf(tabId: string): number {
+  return reopenTick.get(tabId) ?? 0
+}
 
 /** 工作区环境（由工作台注入：当前会话作用域与后台任务列表） */
 export type SplitScope = { sessionId: string; cwd: string }
@@ -1330,6 +1341,31 @@ export const splitStore: SplitState = {
       tabs.push(tab)
       return { ...pane, content: null, tabs, active: tabs.length - 1 }
     }
+    this.mutatePaneOpen(row, i, mutate)
+  },
+
+  reopenTab(row, i, content) {
+    const spec = this.spec
+    if (!spec) return
+    const mutate = (pane: SplitPane): SplitPane => {
+      const tabs = [...(pane.tabs ?? [])]
+      // 去重命中 → 激活 + bump 重载计数（iframe key 变化 = 重挂载，回到全新登录页）
+      const existing = tabs.findIndex((t) => sameContent(t.content, content))
+      if (existing >= 0) {
+        reopenTick.set(tabs[existing].id, (reopenTick.get(tabs[existing].id) ?? 0) + 1)
+        return { ...pane, content: null, tabs, active: existing }
+      }
+      const tab: PaneTab = { id: 't' + Date.now().toString(36), title: tabTitleOf(content), content }
+      tabs.push(tab)
+      return { ...pane, content: null, tabs, active: tabs.length - 1 }
+    }
+    this.mutatePaneOpen(row, i, mutate)
+  },
+
+  /** openTab/reopenTab 共用：按行列把窗格替换为 mutate 结果，落盘并通知 */
+  mutatePaneOpen(row: PaneRow, i: number, mutate: (pane: SplitPane) => SplitPane) {
+    const spec = this.spec
+    if (!spec) return
     if (row === 'left') {
       if (!spec.left || i !== 0) return
       this.spec = { ...spec, left: mutate(spec.left) }
@@ -1678,11 +1714,20 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
   const initial = props.content?.url || 'https://example.com'
   const nav = useNavHistory(initial)
   const [url, setUrl] = useState(initial)
+  // 重载计数：标签栏 ↻（reloadKey）与 reopenTab（reopenTickOf，再点【打开】强制重载）叠加。
+  // key 变化 = iframe 重挂载 = 全新加载（跨源登录页也可靠，与标签 ↻ 同机制）。
+  const [reloadN, setReloadN] = useState(() => props.reloadKey + reopenTickOf(props.tabId))
   const [src, setSrc] = useState(initial)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const navRef = useRef(nav)
   navRef.current = nav
   const embed = useEmbedSrc(src)
+  // 外部强制重载（reopenTab bump）：reloadKey 未变时也把 iframe 重挂载
+  useEffect(() => {
+    const n = props.reloadKey + reopenTickOf(props.tabId)
+    if (n !== reloadN) { setReloadN(n); setSrc(initial); setUrl(initial) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.reloadKey, props.tabId])
   // 地址回写：刷新/重开布局时保持当前网址
   const commit = (raw: string) => splitStore.setTabContent(props.row, props.index, props.tabId, { kind: 'builtin', type: 'browser', url: raw })
   const go = () => {
@@ -1697,12 +1742,18 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
   const doBack = () => { const c = nav.back(); if (c != null) { setUrl(c); setSrc(c); commit(c) } }
   const doFwd = () => { const c = nav.fwd(); if (c != null) { setUrl(c); setSrc(c); commit(c) } }
   // 页面内导航上报：仅当来自本窗格 iframe，且确为新地址才记录（避免重复上报成堆历史）
+  // 填充脚本 (__wt_preset_fill) 也算「代理内页面」信号——逃逸检测依赖它区分。
+  const navSeenRef = useRef(false)
+  const recaptureRef = useRef(0)
+  const loadGenRef = useRef(0)
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const d = e.data as any
-      if (!d || d.__wt_nav !== true || typeof d.url !== 'string') return
+      if (!d || (d.__wt_nav !== true && d.__wt_preset_fill !== true)) return
       const fw = iframeRef.current?.contentWindow
       if (fw && e.source !== fw) return
+      navSeenRef.current = true
+      if (d.__wt_nav !== true || typeof d.url !== 'string') return
       const real = d.url
       if (real && real !== navRef.current.cur) {
         navRef.current.go(real)
@@ -1717,6 +1768,23 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
     return () => window.removeEventListener('message', onMsg)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // 逃逸检测：登录成功后站点常用 JS 绝对地址跳转（location.href = 上游另一端口），iframe 直接
+  // 跳去上游真实地址——该页没有注入脚本（不发任何 __wt_* 上报），浏览器对上游源也没有会话
+  // Cookie（会话种在代理源）→ 停在登录页。代理页每次加载必发上报：load 后 1.5s 零上报 = 已逃逸
+  // → 重挂 iframe 回当前代理地址（站点见会话 Cookie 自动落首页，等价于手动重开一次【打开】）。
+  // 仅代理嵌入（proxied）检测；上限 3 次防异常页面循环。
+  const onFrameLoad = () => {
+    if (!embed.proxied) return
+    navSeenRef.current = false
+    const gen = ++loadGenRef.current
+    window.setTimeout(() => {
+      if (gen !== loadGenRef.current) return // 期间又发生新加载：本轮作废
+      if (navSeenRef.current) return
+      if (recaptureRef.current >= 3) return
+      recaptureRef.current += 1
+      setReloadN((n) => n + 1)
+    }, 1500)
+  }
   return (
     <>
       <div className="dsh-wt_browserBar">
@@ -1738,7 +1806,7 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
       </div>
       {embed.src === null
         ? <div className="dsh-wt_paneFrame" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 12 }}>载入中…</div>
-        : <iframe ref={iframeRef} key={props.reloadKey} className="dsh-wt_paneFrame" src={embed.src} title="browser" />}
+        : <iframe ref={iframeRef} key={reloadN} className="dsh-wt_paneFrame" src={embed.src} title="browser" onLoad={onFrameLoad} />}
     </>
   )
 }

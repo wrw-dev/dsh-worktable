@@ -394,9 +394,12 @@ type SplitPane = {
 - 分栏标签内容随布局条目持久化（`SplitContent.builtin` 为可选字段读时兜底）：2026-09-12 起
   `explorer` 窗可携带 `rootPath`（预置资源「工作台分栏打开」直接落到指定目录的 ExplorerPane）；
 - 预置资源条目存 `dsh.worktable.presets.v1`（PresetEntry[]：kind url/dir、名称/URL/资源路径（目录或文件）、
-  账号/密码（XOR+Base64 混淆，非加密）、备注、打开模式 split/external）——独立于布局数据，
-  打开时才写入分栏标签。dir 条目分栏打开时先经 /api/worktable/fs 探测：文件 → 文件预览标签
-  （FileViewer：MD/PDF/图片/文本）、目录 → ExplorerPane（2026-09-14 起，修复文件路径 500）。
+  accounts 账号组数组（每组 {id,user,secret}，secret 走 XOR+Base64 混淆，非加密；多账号支持，
+  旧单账号字段 account/secret 加载时自动迁入数组首组并随下次保存清除）、备注、打开模式 split/external）
+  ——独立于布局数据，打开时才写入分栏标签。dir 条目分栏打开时先经 /api/worktable/fs 探测：
+  文件 → 文件预览标签（FileViewer：MD/PDF/图片/文本）、目录 → ExplorerPane（2026-09-14 起，修复文件路径 500）。
+  多账号（2026-09-28 起）：每条 url 预置可存多组账号密码；分栏打开前有 ≥2 组凭据先弹「选择登录账号」
+  （选哪组就 staged 哪组，自动填充行为不变；单组直接用、外部打开不弹选）；复制账号/密码 ≥2 组同样先弹选。
 
 ### 13.7 内容窗可行性记录（2026-08-16）
 
@@ -410,6 +413,7 @@ type SplitPane = {
 | 自定义 vibe | ✅ 可闭环 | 描述需求 → agent 生成新项目（插件/站点）→ 注册进工作台（UI 已留 ✨ 入口）。✨ 自定义窗两模式（新建对话/发送到会话）点发送后调用宿主 sessions.open(会话id)，右侧对话窗自动切到目标会话（2026-08-18 无头探针实测 switched=true） |
 | 预置资源 | ✅ 已实现（第一版，2026-09-12） | 窗格选择器 📌 磁贴；条目两类（浏览器链接 / 本地资源路径（目录或文件））× 两种打开模式（工作台分栏 = BrowserPane 走 /embed 代理（凭据自动填充，只填不提交）；路径先 /fs 探测——目录挂 ExplorerPane rootPath、文件直接开 FileViewer 文件预览标签；外部 = window.open 或 /api/worktable/open-path→explorer.exe）。增删改查 + 密码掩码 + URL/路径校验 + 复制账号/密码按钮（外部打开无自动填充的补偿） |
 | 预置资源·路径选择弹窗 | ✅ 已实现（2026-09-14） | 本地资源路径输入框旁 📂 → PathPickerModal（React portal 挂 body + z-index 6000 置顶，不被窗格遮挡）：服务端 /api/worktable/drives 枚举盘符（A-Z stat 探测；POSIX 回 / 与挂载点）→ 盘符快捷条；面包屑导航 + 目录/文件混合列表（目录行进入、文件行选中、页脚选当前目录）；初始是文件路径自动落到父目录；输入框保持可编辑，手填/粘贴与弹窗选择双通道 |
+| 预置资源·多账号 | ✅ 已实现（2026-09-28） | url 预置表单账号/密码改为行组编辑（＋添加账号/✕删行，全空行不保存）；分栏打开 ≥2 组凭据先弹「选择登录账号」（AccountPickerModal，复用 pathPicker 骨架；单组直接用、外部打开永不弹选）；复制账号/密码 ≥2 组同样先弹选是哪一组；旧单账号数据加载自动迁入数组首组，保存后旧字段清除 |
 
 ### 13.8 里程碑
 

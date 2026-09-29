@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-worktable 预置填充修复 · 端到端证据</title>
+<style>
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0b0e14; color: #e6e8eb; margin: 0; padding: 28px 34px; }
+  h1 { font-size: 20px; margin: 0 0 4px; } .sub { color: #9aa4b2; font-size: 12.5px; margin-bottom: 22px; }
+  h2 { font-size: 15px; margin: 26px 0 10px; color: #9cc6ff; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  td, th { border: 1px solid #263041; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #131926; color: #9aa4b2; font-weight: 600; }
+  .pass { color: #58d68d; font-weight: 700; } .fail { color: #ff6b6b; font-weight: 700; }
+  .box { border: 1px solid #263041; border-radius: 8px; padding: 12px 16px; margin: 10px 0; background: #10151f; }
+  code { background: #1a2233; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  .flow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; margin: 8px 0; }
+  .step { border: 1px solid #2d3a52; border-radius: 6px; padding: 6px 10px; background: #131a28; }
+  .arrow { color: #9cc6ff; }
+</style>
+</head>
+<body>
+<h1>预置资源 · 金蝶AI套件 自动填充 + 登录态修复</h1>
+<div class="sub">dsh-worktable @ C:\Users\26294\.dsh\plugins\dsh-worktable · 2026-09-29 · 探针全部真实执行（非 mock 断言汇总）</div>
+
+<h2>① 端到端链路（probe-embed-e2e.cjs 13/13 PASS，EXIT=0）</h2>
+<div class="flow">
+  <span class="step">登录页经代理拉取<br><b>注入凭据 payload ✓</b></span><span class="arrow">→</span>
+  <span class="step">Set-Cookie 清洗透传<br><b>去 Domain/Secure + Lax ✓</b></span><span class="arrow">→</span>
+  <span class="step">登录 POST 302<br><b>Location 改写为入口源代理根 ✓</b></span><span class="arrow">→</span>
+  <span class="step">入口页（跨端口）<br><b>镜像补齐会话 → 200 首页 ✓</b></span><span class="arrow">→</span>
+  <span class="step">填充完成上报<br><b>凭据即删 ✓</b></span>
+</div>
+<div class="box">模拟金蝶：LOGIN 源（登录页 + /svc/login 种 kdservice-sessionid + 302 绝对 Location 跳 PORTAL 源）与 PORTAL 源（无会话 302 弹回 /login）。真实加载 <code>lib/index.js</code> 的 <code>apply()</code>，stub cordis ctx 捕获注册路由。</div>
+
+<h2>② 三探针总览（49/49 断言 PASS）</h2>
+<table>
+<tr><th>探针</th><th>覆盖</th><th>结果</th></tr>
+<tr><td>probe-preset-accounts.cjs（jsdom 真渲染）</td><td>多账号选择弹层、staged 凭据、打开走 reopenTab、复制账号（含「已选账号名」toast 修复）</td><td><span class="pass">31/31 PASS</span> EXIT=0</td></tr>
+<tr><td>probe-preset-fill-server.cjs（esbuild 打桩白盒）</td><td>注入器结构（矩形可见性/弃用 offsetParent/中文词/补填循环/readonly）、Cookie 镜像合并与隔离、Set-Cookie 清洗、无 staged 不注入（隐私）</td><td><span class="pass">18/18 PASS</span></td></tr>
+<tr><td>probe-embed-e2e.cjs（真产物 + 模拟金蝶）</td><td>上表①全部链路</td><td><span class="pass">13/13 PASS</span> EXIT=0</td></tr>
+</table>
+
+<h2>③ 根因 → 修复对照</h2>
+<table>
+<tr><th>用户报障</th><th>根因</th><th>修复</th></tr>
+<tr><td>账号密码从来没填过</td><td>可见性用 <code>offsetParent===null</code>，金蝶 fixed 全屏登录容器恒判不可见；用户名框仅在密码框之前被识别；只填一次</td><td>矩形+祖链可见性；「最后可见文本框」兜底配对 + 中文词；30s 补填循环；readonly 放行；首填无条件、补填只救空值不碰焦点字段</td></tr>
+<tr><td>登录后被弹回登录页</td><td>登录 Cookie 按源隔离，跨端口 302 落地源没有 Cookie；绝对 Location 跳出代理包络</td><td>Cookie 主机名镜像（内存态）；同主机跨端口 302 Location 改写为目标端口源代理根；staged 凭据 90s 同主机名跨端口兜底</td></tr>
+<tr><td>再点【打开】没反应</td><td>openTab 对同内容标签只激活不重载，staged 凭据已过期</td><td>预置【打开】走 <code>reopenTab</code>：iframe 强制重挂载 = 全新登录页 + 凭据重新注入</td></tr>
+</table>
+
+<h2>④ 生效方式</h2>
+<div class="box">
+客户端（填充脚本/打开行为）：构建产物实时下发，<b>F5 刷新 GUI 即生效</b>。<br>
+服务端（Cookie 桥/302 改写/staged 兜底）：<b>需重启 dsh web 一次</b>（当前实例 09:03 启动，早于 11:49 构建）。<br>
+贝可曼验收：预置资源 → 打开「贝可曼AI套件」→ 登录页应自动填好账号密码（只填不提交）→ 手动点登录 → 落在首页不再弹回。
+</div>
+<div class="sub" style="margin-top:18px">产物：01_content/lib/{index,client}.js（11:49 构建，node --check 0）· 工作日志：02_process/worklogs/2026-09-29_preset-fill-kingdee.md</div>
+</body>
+</html>

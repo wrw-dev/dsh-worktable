@@ -143,37 +143,66 @@ function injectNavNotifyScript(html: string, targetOrigin: string): string {
   const i = html.toLowerCase().indexOf('</head>')
   const base = i >= 0 ? html.slice(0, i) + script + html.slice(i) : script + html
   // 预置资源管理：有 staged 凭据时叠加登录自动填充脚本（native setter 触发框架监听，
-  // 只填不提交；成功 postMessage 给父页面 → 客户端调 /preset-fill/done 删凭据）
+  // 只填不提交；成功 postMessage 给父页面 → 客户端调 /preset-fill/done 删凭据）。
+  // 精确 origin 命中优先；90 秒窗口内允许同主机名跨端口兜底（登录页/入口页端口不同的站点）。
   const fill = presetFillStage.get(targetOrigin)
+    ?? (presetFillStage.size > 0
+      ? (() => { const h = mirrorHostOf(targetOrigin); for (const [k, v] of presetFillStage) { if (mirrorHostOf(k) === h) return v } return null })()
+      : null)
   if (!fill) return base
   const payload = JSON.stringify({ user: fill.user, pass: fill.pass })
-  const fillScript =
-    '<script>(function(){var D=' + payload + ';var done=false;' +
+  const fillScriptOpen = '<script>'
+  const fillBody =
+    '(function(){var D=' + payload + ';var done=false,tries=0;' +
     'function native(el,v){try{var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;' +
     'var d=Object.getOwnPropertyDescriptor(proto,"value");if(d&&d.set)d.set.call(el,v);else el.value=v;' +
-    'el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}))}catch(e){}}' +
-    'function guess(el){if(!el)return null;var v=(el.name||"")+" "+(el.id||"")+" "+(el.getAttribute("autocomplete")||"")+" "+(el.placeholder||"")+' +
+    'el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));' +
+    'try{el.dispatchEvent(new KeyboardEvent("keyup",{bubbles:true}))}catch(e){}}catch(e){}}' +
+    'function guess(el){if(!el)return "";var v=(el.name||"")+" "+(el.id||"")+" "+(el.getAttribute("autocomplete")||"")+" "+(el.placeholder||"")+' +
     '(el.getBoundingClientRect?Array.prototype.slice.call(el.labels||[]).map(function(l){return l.textContent||""}).join(" "):"");return v.toLowerCase()}' +
-    'function isPw(el){return !!el&&el.type==="password"}' +
-    'function userLike(s){return /user|email|account|login|name|phone|mobile|mail/.test(s)}' +
-    'function fill(){try{var f=null,inputs=document.querySelectorAll("input");var pw=null;' +
+    'function userLike(s){return /user|email|account|login|name|phone|mobile|mail|用户|账号|帐号|账户|手机|邮箱/.test(s)}' +
+    // 可见性：offsetParent 对 position:fixed 恒为 null（金蝶等全屏登录容器常见），必须走矩形 + 祖先链：
+    // 自身与祖先链上任何零尺寸元素都判不可见，fixed 定位按可见处理。
+    'function visible(el){if(!el||el.disabled)return false;' +
+    'var r=el.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;' +
+    'var st=getComputedStyle(el);if(st.visibility==="hidden"||st.display==="none")return false;' +
+    'var n=el;while(n&&n.nodeType===1){if(n.clientWidth===0&&n.clientHeight===0&&getComputedStyle(n).overflow!=="visible")return false;' +
+    'n=n.parentElement}return true}' +
+    // 用户名候选：a) 同表单内 guess 命中的可见文本框；b) 全页最后一个可见文本框（覆盖
+    // 「账号框在密码框之后」「两框不同 form / 无 form」等布局）。
+    'function anyVisible(){var inputs=document.querySelectorAll("input");var best=null;' +
     'for(var i=0;i<inputs.length;i++){var el=inputs[i];var t=(el.type||"").toLowerCase();' +
-    'if(t==="hidden"||el.disabled||el.readOnly||el.offsetParent===null)continue;' +
-    'if(t==="password"){pw=el;continue}' +
-    'if((t==="text"||t==="email"||t==="tel")&&!pw){var g=guess(el);if(g&&userLike(g)){f=el;break}}}' +
-    'if(!pw){var forms=document.querySelectorAll("form");for(var j=0;j<forms.length;j++){var p=forms[j].querySelector(\'input[type="password"]\');if(p){pw=p;f=null;break}}}' +
-    'if(pw){var visible=function(el){return el&&el.offsetParent!==null};var target=null;' +
-    'if(visible(f))target=f;else{var form=pw.closest?pw.closest("form"):null;var cand=form?form.querySelectorAll("input"):document.querySelectorAll("input");' +
-    'for(var k=0;k<cand.length;k++){var ce=cand[k];var ct=(ce.type||"").toLowerCase();if(ct!=="text"&&ct!=="email"&&ct!=="tel")continue;' +
-    'if(ce===pw||ce.disabled||ce.readOnly||ce.offsetParent===null)continue;target=ce;break}}' +
-    'if(D.user&&target&&native(target,D.user),native(pw,D.pass),!done){done=true;' +
-    'try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}return true}return false}catch(e){return false}}' +
-    'if(fill())return;' +
-    'var n=0;var iv=setInterval(function(){n++;if(fill()||n>60){clearInterval(iv);if(n>60&&!done){try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}}},500);' +
-    'document.addEventListener("DOMContentLoaded",function(){if(!done)fill()})' +
-    '})()<\/script>'
+    'if(t!=="text"&&t!=="email"&&t!=="tel")continue;' +
+    'if(el.disabled)continue;' +
+    'if(!visible(el))continue;' +
+    'best=el}return best}' +
+    'function fillOnce(first){try{var pw=null,inputs=document.querySelectorAll("input");' +
+    'for(var i=0;i<inputs.length;i++){var el=inputs[i];var t=(el.type||"").toLowerCase();' +
+    'if(t==="hidden"||el.disabled)continue;' +
+    'if(!visible(el))continue;' +
+    'if(t==="password"){pw=el;break}}' +
+    'if(!pw)return false;' +
+    'var f=null;' +
+    'var form=pw.closest?pw.closest("form"):null;' +
+    'var cand=form?form.querySelectorAll("input"):inputs;' +
+    'for(var j=0;j<cand.length;j++){var ce=cand[j];var ct=(ce.type||"").toLowerCase();' +
+    'if((ct!=="text"&&ct!=="email"&&ct!=="tel")||ce===pw||ce.disabled)continue;' +
+    'if(!visible(ce))continue;' +
+    'var g=guess(ce);if(g&&userLike(g)){f=ce;break}}' +
+    'if(!f){var gb=anyVisible();if(gb&&gb!==pw)f=gb}' +
+    // readonly 放行：原生 setter 可写（框架监听 input 事件后自己接管）。
+    // 写入策略：首填无条件；补填只救「被框架清空的空值」，且不碰焦点字段（尊重手工修改）。
+    'function put(el,v){if(!el)return;var cur=el.value;if(cur===v)return;' +
+    'if(!first&&(cur!==""||el===document.activeElement))return;native(el,v)}' +
+    'put(pw,D.pass);if(D.user)put(f,D.user);' +
+    'if(!done){done=true;try{parent.postMessage({__wt_preset_fill:true},"*")}catch(e){}}return true}catch(e){return false}}' +
+    // 补填循环：每 500ms 重试 60 次（30 秒），框架迟渲染/迟清空后自动补上。
+    'if(fillOnce(true)){}' +
+    'var iv=setInterval(function(){tries++;if(tries>60){clearInterval(iv);return}fillOnce(false)},500);' +
+    'document.addEventListener("DOMContentLoaded",function(){fillOnce(tries===0)})' +
+    '})()'
   const j = base.toLowerCase().lastIndexOf('</body>')
-  return j >= 0 ? base.slice(0, j) + fillScript + base.slice(j) : base + fillScript
+  return j >= 0 ? base.slice(0, j) + fillScriptOpen + fillBody + '<\/script>' : base + fillScriptOpen + fillBody + '<\/script>'
 }
 
 interface EmbedProxy {
@@ -187,8 +216,57 @@ const embedProxies = new Map<string, EmbedProxy>()
 const EMBED_PROXY_MAX = 8      // LRU 上限：够用（8 个并发站点窗）且不滥用端口
 const EMBED_PROXY_IDLE_MS = 60 * 60 * 1000
 
+// —— 整源代理跨源会话桥 ————————————————————————————————————————
+// 症状：预置链接「登录后被弹回登录页」。金蝶等站点登录成功后常 302 跳到另一端口/入口地址；
+// 浏览器按源（scheme+host+port）隔离 Cookie，而每个目标源各占一个 127.0.0.1 代理端口 →
+// 跨源跳转落地的源没有登录 Cookie，登录态「丢失」，页面把用户踢回登录页无限循环。
+// 修复 = 主机名 Cookie 镜像（仅 127.0.0.1 本机内存，不落盘）：
+//   ① 各源响应的 Set-Cookie 捕获进 hostname 桶；
+//   ② 同主机名跨端口 302 落地时，用来源源当前 Cookie 播种目标源桶（首跳建桶）；
+//   ③ 各源转发请求前按主机名补齐缺失的 Cookie（同名以浏览器当前源自带值为准，镜像只补缺）。
+// 凭据窗口：只有同主机名（含端口差异）互通；不同主机的站点互不共享，行为与直连一致。
+const cookieMirror = new Map<string, Map<string, string>>() // hostname → (cookie 名 → 完整 name=value 对)
+
+function mirrorHostOf(origin: string): string {
+  try { return new URL(origin).hostname } catch { return origin }
+}
+
+/** 记录某响应的 Set-Cookie 到该主机名的镜像桶（只留 name=value 对，属性不参与镜像） */
+function mirrorCapture(host: string, setCookies: string[] | undefined): void {
+  if (!host || !setCookies || setCookies.length === 0) return
+  let bucket = cookieMirror.get(host)
+  if (!bucket) { bucket = new Map(); cookieMirror.set(host, bucket) }
+  for (const sc of setCookies) {
+    const pair = sc.split(';')[0] ?? ''
+    const eq = pair.indexOf('=')
+    if (eq <= 0) continue
+    const name = pair.slice(0, eq).trim()
+    if (!name) continue
+    bucket.set(name, pair)
+  }
+}
+
+/** 请求转发前按主机名补齐镜像 Cookie（只补缺失的名字）；无镜像时返回 null（保持原样） */
+function mirrorMerge(host: string, existing: string | undefined): string | null {
+  const bucket = cookieMirror.get(host)
+  if (!bucket || bucket.size === 0) return null
+  const have = new Set<string>()
+  const parts: string[] = []
+  if (existing) {
+    for (const p of existing.split(';')) {
+      const t = p.trim()
+      if (!t) continue
+      const eq = t.indexOf('=')
+      if (eq > 0) have.add(t.slice(0, eq).trim())
+      parts.push(t)
+    }
+  }
+  for (const [name, pair] of bucket) if (!have.has(name)) parts.push(pair)
+  return parts.length ? parts.join('; ') : null
+}
+
 /** 转发浏览器（iframe 内页面）请求到目标源 */
-async function embedForward(clientReq: any, clientRes: any, targetOrigin: string) {
+async function embedForward(clientReq: any, clientRes: any, targetOrigin: string, ctx?: Context) {
   const u = new URL(clientReq.url ?? '/', targetOrigin)
   const inHeaders: Record<string, string> = {}
   for (const [k, v] of Object.entries(clientReq.headers)) {
@@ -196,8 +274,12 @@ async function embedForward(clientReq: any, clientRes: any, targetOrigin: string
     if (v !== undefined) inHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v)
   }
   inHeaders.referer = targetOrigin + '/'
-  const cookieHeader = clientReq.headers.cookie
-  if (typeof cookieHeader === 'string' && cookieHeader) inHeaders.cookie = cookieHeader
+  // 跨源会话桥③：同主机名 Cookie 补齐（同名以浏览器当前源自带值为准，镜像只补缺）
+  const mh = mirrorHostOf(targetOrigin)
+  const rawCookie: string | undefined = clientReq.headers.cookie
+  const mergedCookie = mirrorMerge(mh, typeof rawCookie === 'string' ? rawCookie : undefined)
+  if (mergedCookie) inHeaders.cookie = mergedCookie
+  else if (typeof rawCookie === 'string' && rawCookie) inHeaders.cookie = rawCookie
   const init: any = { method: clientReq.method, headers: inHeaders, redirect: 'manual', signal: AbortSignal.timeout(30000) }
   if (clientReq.method !== 'GET' && clientReq.method !== 'HEAD') {
     const chunks: Buffer[] = []
@@ -232,10 +314,24 @@ async function embedForward(clientReq: any, clientRes: any, targetOrigin: string
   if (typeof (upstream.headers as any).getSetCookie === 'function') {
     setCookies = ((upstream.headers as any).getSetCookie() as string[]).map(embedRewriteSetCookie)
   }
-  // 重定向指回代理自身（保持整源体验，浏览器地址栏始终 127.0.0.1）
+  // 跨源会话桥①：捕获本响应的登录 Cookie 到主机名镜像桶（本机内存，不落盘）。
+  // 桶按主机名键控：同主机跨端口的各代理源天然共享同一桶（见 mirrorMerge）。
+  mirrorCapture(mh, setCookies)
+  // 重定向指回代理自身（保持整源体验，浏览器地址栏始终 127.0.0.1）。
+  // 关键：同主机跨端口 302（金蝶登录后跳另一端口入口）必须改写为「目标端口源的代理根」，
+  // 否则 iframe 直接跳去上游绝对地址 → 被浏览器拒绝/跳出代理包络，登录态链路断裂（被弹回登录页）。
   const loc = upstream.headers.get('location')
   if (loc && upstream.status >= 300 && upstream.status < 400) {
-    try { outHeaders.location = new URL(loc, u.href).href.replace(targetOrigin, `http://127.0.0.1:${(clientReq as any).__embedPort}`) } catch {}
+    try {
+      const dest = new URL(loc, u.href)
+      const srcHost = new URL(targetOrigin).hostname
+      if (dest.hostname === srcHost && dest.origin !== targetOrigin && ctx) {
+        const destProxyRoot = await ensureEmbedProxy(ctx, dest.origin)
+        outHeaders.location = destProxyRoot + dest.pathname + dest.search + dest.hash
+      } else {
+        outHeaders.location = new URL(loc, u.href).href.replace(targetOrigin, `http://127.0.0.1:${(clientReq as any).__embedPort}`)
+      }
+    } catch {}
   }
   if (setCookies) (outHeaders as any)['set-cookie'] = setCookies
   clientRes.writeHead(upstream.status, outHeaders)
@@ -279,7 +375,7 @@ function ensureEmbedProxy(ctx: Context, targetOrigin: string): Promise<string> {
     const server = createServer((req, res) => {
       const ep = embedProxies.get(key)
       if (ep) { ep.lastUsed = Date.now(); (req as any).__embedPort = ep.port }
-      embedForward(req, res, key).catch(() => { try { res.end() } catch {} })
+      embedForward(req, res, key, ctx).catch(() => { try { res.end() } catch {} })
     })
     server.on('error', (err: any) => {
       embedProxies.delete(key)
@@ -721,7 +817,12 @@ export function apply(ctx: Context) {
         if (req.method !== 'POST') { json(res, 405, { ok: false }); return }
         const body = await readJsonBody(req)
         const origin = typeof body.origin === 'string' ? originOf(body.origin) : null
-        if (origin) presetFillStage.delete(origin)
+        if (origin) {
+          presetFillStage.delete(origin)
+          // 同主机名跨端口兜底命中的凭据一并清掉（90 秒窗口内用后即弃语义不破）
+          const h = mirrorHostOf(origin)
+          for (const k of [...presetFillStage.keys()]) if (mirrorHostOf(k) === h) presetFillStage.delete(k)
+        }
         json(res, 200, { ok: true })
       } catch (err) {
         json(res, 500, { ok: false, error: String(err) })
@@ -856,3 +957,6 @@ export function apply(ctx: Context) {
 
   setupTerminal(webServer, ctx)
 }
+
+// 白盒测试出口（运行时无消费者：cordis 只读 name/inject/默认导出；04_test 探针 re-export 用）
+export const __testHooks = { injectNavNotifyScript, embedRewriteSetCookie, mirrorCapture, mirrorMerge, mirrorHostOf, embedProxies }
