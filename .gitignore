@@ -7,4 +7,5 @@ node_modules/
 *.local.json
 .DS_Store
 Thumbs.db
+04_test/.run-*/
 
