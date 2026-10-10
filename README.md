@@ -2,7 +2,7 @@
 
 <p align="center"><b>English</b> · <a href="README.zh.md">简体中文</a></p>
 
-**An agent-project workbench for DeepSeek Harness** — a sidebar app drawer that turns every project into dockable windows, plus a built-in control room that watches them all in real time.
+**dsh-worktable** is a third-party **DeepSeek Harness (DSH) plugin** — DSH is the agent runtime you start with `npx @deepseek-ai/dsh web`. It adds a sidebar app drawer that turns every project into dockable windows, plus a built-in control room that watches them all in real time.
 
 ## 📸 Screenshots
 
@@ -63,6 +63,8 @@
 
 ## Quick start
 
+**Prerequisite** — this is a DSH plugin: the [DeepSeek Harness](https://github.com/deepseek-ai) runtime must already be running (`npx @deepseek-ai/dsh web` starts it). The worktable plugs into that runtime and shows up inside its web GUI; it does not run standalone.
+
 1. **Install** (pick one):
 
    **A · one-liner (recommended)** — straight from the GitHub Release tarball, no Git needed:
@@ -79,7 +81,7 @@
    # e.g. cloned into D:\tools → dsh plugin --profile web add "link:D:/tools/dsh-worktable/01_content"
    ```
 
-   Either way the `add` command registers `dsh-worktable` in the profile bundle list (writes to `~/.dsh`, may ask for authorization). If the `dsh` command is missing, use `npx @deepseek-ai/dsh` instead.
+   Either way the `add` command **installs the plugin into your DSH profile** — it registers `dsh-worktable` in the profile bundle list (writes to `~/.dsh`, may ask for authorization). If the `dsh` command is missing, use `npx @deepseek-ai/dsh` instead.
 2. **Restart** the DSH web process, refresh the GUI
 3. **Open the control room**: click the pinned 🖥️ control-room card → bind one conversation (join existing or create new) → you get the live card grid
 4. **Create projects**: sidebar ＋ → pick a layout preset, set a project folder
@@ -157,9 +159,14 @@ No telemetry, no network calls beyond the host APIs and the plugin routes. All u
 
 ---
 
-## License
+## License & attribution
 
-MIT
+This project is **an extension of [dsh-worktable](https://github.com/Aisland-SJL/dsh-worktable)** by Aisland-SJL — the original plugin (sidebar drawer, split workspace, control room and the whole underlying architecture) is that project's work; this fork adds the preset-resources module, preset folder grouping and other follow-up features on top of it.
+
+- **Original project & copyright**: [Aisland-SJL/dsh-worktable](https://github.com/Aisland-SJL/dsh-worktable) © 2026 dsh-worktable contributors
+- **This fork**: maintained at [wrw-dev/dsh-worktable](https://github.com/wrw-dev/dsh-worktable), same additions © its contributors
+
+Both are released under the **MIT License** (see [LICENSE](LICENSE)); this distribution keeps the original copyright notice as required by the license. If you only need the stable original, use the upstream repository linked above.
 
 ## Related
 

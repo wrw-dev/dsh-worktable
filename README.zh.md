@@ -2,7 +2,7 @@
 
 <p align="center"><a href="README.md"><b>English</b></a> · 简体中文</p>
 
-**DeepSeek Harness 的 agent 项目工作台**——侧边栏「应用抽屉」把每个项目变成可停靠的窗口，再加一个实时监控所有项目的内置「控制室」。
+**dsh-worktable** 是一个第三方 **DeepSeek Harness（DSH）插件**——DSH 即用 `npx @deepseek-ai/dsh web` 启动的 agent 运行时。它通过侧边栏「应用抽屉」把每个项目变成可停靠的窗口，再加一个实时监控所有项目的内置「控制室」。
 
 ## 📸 截图
 
@@ -63,6 +63,8 @@
 
 ## 快速开始
 
+**前置条件**——这是一个 DSH 插件：需要先跑起 [DeepSeek Harness](https://github.com/deepseek-ai) 运行时（`npx @deepseek-ai/dsh web`）。工作台装进该运行时后显示在其 Web 界面里，**不能独立运行**。
+
 1. **安装**（二选一）：
 
    **A · 一行命令（推荐）** —— 直接安装 GitHub Release 的安装包，无需 Git：
@@ -79,7 +81,7 @@
    # 例：克隆到 D:\tools 后 → dsh plugin --profile web add "link:D:/tools/dsh-worktable/01_content"
    ```
 
-   两种方式 `add` 都会把 `dsh-worktable` 注册进 profile 的 bundle 列表（写入 `~/.dsh`，可能需要授权确认）；若提示找不到 `dsh` 命令，用 `npx @deepseek-ai/dsh` 代替。
+   两种方式 `add` 都会**把插件装进你的 DSH profile**——即将 `dsh-worktable` 注册进 profile 的 bundle 列表（写入 `~/.dsh`，可能需要授权确认）；若提示找不到 `dsh` 命令，用 `npx @deepseek-ai/dsh` 代替。
 2. **重启** DSH web 进程并刷新界面
 3. **打开控制室**：点击固定首位的 🖥️ 控制室卡片 → 绑定一条对话（加入现有或新建）→ 得到实时卡片网格
 4. **创建项目**：侧边栏 ＋ → 选布局预设、填项目文件夹
@@ -157,9 +159,14 @@ node --check lib/index.js
 
 ---
 
-## License
+## 许可证与来源
 
-MIT
+本项目是 **[dsh-worktable](https://github.com/Aisland-SJL/dsh-worktable)（作者 Aisland-SJL）的扩展版**——原插件（侧边栏应用抽屉、分栏工作区、控制室及整套底层架构）是上游项目的成果；本仓库在其基础上增加了预置资源管理、预设文件夹分组等后续功能。
+
+- **原项目与版权**：[Aisland-SJL/dsh-worktable](https://github.com/Aisland-SJL/dsh-worktable) © 2026 dsh-worktable contributors
+- **本扩展版**：维护于 [wrw-dev/dsh-worktable](https://github.com/wrw-dev/dsh-worktable)，新增部分 © 其贡献者
+
+两者均以 **MIT 协议**发布（见 [LICENSE](LICENSE)）；本发行版按协议要求保留原版权声明。如果你只需要稳定版原插件，请使用上面的上游仓库。
 
 ## 相关项目
 
