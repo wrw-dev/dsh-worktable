@@ -65,15 +65,24 @@
 
 **前置条件**——这是一个 DSH 插件：需要先跑起 [DeepSeek Harness](https://github.com/deepseek-ai) 运行时（`npx @deepseek-ai/dsh web`）。工作台装进该运行时后显示在其 Web 界面里，**不能独立运行**。
 
-1. **安装**（二选一）：
+1. **安装**（三选一）：
 
-   **A · 一行命令（推荐）** —— 直接安装 GitHub Release 的安装包，无需 Git：
+   **A · 桌面版零命令（推荐给 DeepSeek Harness 桌面版用户）** —— 复制下面整段提示词，粘贴发给桌面版里的任意对话（或新建一个对话），AI 会代为下载安装并提醒你重启：
+
+   ```text
+   请帮我把 dsh-worktable 工作台插件安装到 DeepSeek Harness 的 web profile：
+   执行 dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"
+   （若提示找不到 dsh 命令，用 npx @deepseek-ai/dsh 代替）
+   完成后告诉我重启 DSH 并刷新页面。
+   ```
+
+   **B · 一行命令（有 Node/npm 环境的终端用户）** —— 直接安装 GitHub Release 的安装包，无需 Git：
 
    ```bash
    dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"
    ```
 
-   **B · 本地克隆（想改源码用）** —— `link:` 只接受本地绝对路径（路径不要带空格）：
+   **C · 本地克隆（想改源码用）** —— `link:` 只接受本地绝对路径（路径不要带空格）：
 
    ```bash
    git clone https://github.com/wrw-dev/dsh-worktable.git
@@ -81,7 +90,7 @@
    # 例：克隆到 D:\tools 后 → dsh plugin --profile web add "link:D:/tools/dsh-worktable/01_content"
    ```
 
-   两种方式 `add` 都会**把插件装进你的 DSH profile**——即将 `dsh-worktable` 注册进 profile 的 bundle 列表（写入 `~/.dsh`，可能需要授权确认）；若提示找不到 `dsh` 命令，用 `npx @deepseek-ai/dsh` 代替。
+   三种方式 `add` 都会**把插件装进你的 DSH profile**——即将 `dsh-worktable` 注册进 profile 的 bundle 列表（写入 `~/.dsh`，可能需要授权确认）；若提示找不到 `dsh` 命令，用 `npx @deepseek-ai/dsh` 代替。
 2. **重启** DSH web 进程并刷新界面
 3. **打开控制室**：点击固定首位的 🖥️ 控制室卡片 → 绑定一条对话（加入现有或新建）→ 得到实时卡片网格
 4. **创建项目**：侧边栏 ＋ → 选布局预设、填项目文件夹

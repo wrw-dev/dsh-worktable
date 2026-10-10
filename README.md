@@ -67,13 +67,22 @@
 
 1. **Install** (pick one):
 
-   **A · one-liner (recommended)** — straight from the GitHub Release tarball, no Git needed:
+   **A · zero-command for the desktop app (recommended for DeepSeek Harness desktop users)** — copy the whole prompt below and paste it to any conversation (or a new one) in the desktop app; the AI downloads and installs it for you, then reminds you to restart:
+
+   ```text
+   Please install the dsh-worktable plugin into the DeepSeek Harness web profile:
+   run dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"
+   (if the dsh command is missing, use npx @deepseek-ai/dsh instead)
+   When done, remind me to restart DSH and refresh the page.
+   ```
+
+   **B · one-liner (terminal users with Node/npm)** — straight from the GitHub Release tarball, no Git needed:
 
    ```bash
    dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"
    ```
 
-   **B · local clone (for hacking on the source)** — `link:` accepts a local absolute path only (no spaces in the path):
+   **C · local clone (for hacking on the source)** — `link:` accepts a local absolute path only (no spaces in the path):
 
    ```bash
    git clone https://github.com/wrw-dev/dsh-worktable.git
@@ -81,7 +90,7 @@
    # e.g. cloned into D:\tools → dsh plugin --profile web add "link:D:/tools/dsh-worktable/01_content"
    ```
 
-   Either way the `add` command **installs the plugin into your DSH profile** — it registers `dsh-worktable` in the profile bundle list (writes to `~/.dsh`, may ask for authorization). If the `dsh` command is missing, use `npx @deepseek-ai/dsh` instead.
+   All three ways run `add`, which **installs the plugin into your DSH profile** — it registers `dsh-worktable` in the profile bundle list (writes to `~/.dsh`, may ask for authorization). If the `dsh` command is missing, use `npx @deepseek-ai/dsh` instead.
 2. **Restart** the DSH web process, refresh the GUI
 3. **Open the control room**: click the pinned 🖥️ control-room card → bind one conversation (join existing or create new) → you get the live card grid
 4. **Create projects**: sidebar ＋ → pick a layout preset, set a project folder
