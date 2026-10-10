@@ -9222,7 +9222,7 @@ var CHANGELOG_V030 = `\u66F4\u65B0\u516C\u544A \xB7 v0.3.3
 
 // src/client/updateCheck.ts
 var LOCAL_VERSION = false ? "dev" : "0.3.6";
-var UPDATE_REPO = "Aisland-SJL/dsh-worktable";
+var UPDATE_REPO = "wrw-dev/dsh-worktable";
 var K_UPDATE_CHECK = "dsh.worktable.updateCheck.v1";
 var K_LAST_CHECK = "dsh.worktable.lastUpdateCheck.v1";
 var K_SKIP = "dsh.worktable.skipVersion.v1";
@@ -18440,7 +18440,7 @@ function boxPayload(x0, y0, x1, y1) {
   }
   return { primary, line, candidates, limited, src };
 }
-var UPGRADE_CMD = 'dsh plugin --profile web add "https://github.com/Aisland-SJL/dsh-worktable/releases/latest/download/dsh-worktable.tgz"';
+var UPGRADE_CMD = 'dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"';
 var UPGRADE_AI = "\u5E2E\u6211\u5347\u7EA7 dsh-worktable\uFF1A\u6267\u884C " + UPGRADE_CMD + "\uFF0C\u5B8C\u6210\u540E\u63D0\u9192\u6211\u91CD\u542F dsh web \u5E76\u5237\u65B0\u9875\u9762";
 async function copyTextSafe(text2) {
   try {
@@ -21933,8 +21933,8 @@ var WAVE_BG_B64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAYEBQUFBAYFBQUHBgYHCQ8KCQgIC
 // src/client/index.tsx
 var import_jsx_runtime3 = require("react/jsx-runtime");
 var LOCAL_VERSION2 = false ? "dev" : "0.3.6";
-var UPDATE_REPO2 = "Aisland-SJL/dsh-worktable";
-var UPGRADE_CMD2 = 'dsh plugin --profile web add "https://github.com/Aisland-SJL/dsh-worktable/releases/latest/download/dsh-worktable.tgz"';
+var UPDATE_REPO2 = "wrw-dev/dsh-worktable";
+var UPGRADE_CMD2 = 'dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"';
 var UPGRADE_AI2 = "\u5E2E\u6211\u5347\u7EA7 dsh-worktable\uFF1A\u6267\u884C " + UPGRADE_CMD2 + "\uFF0C\u5B8C\u6210\u540E\u63D0\u9192\u6211\u91CD\u542F dsh web \u5E76\u5237\u65B0\u9875\u9762";
 var ICON_SYNC = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("svg", { viewBox: "0 0 16 16", "aria-hidden": true, children: [
   /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("path", { fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round", d: "M1.5 8a6.5 6.5 0 0 1 11.1-4.6L14.5 5" }),
