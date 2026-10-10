@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { parentPathOf } from './pathutil'
+import { hostWebSocketUrl, worktableUpgrade } from './hostTransport'
 import { CHANGELOG_V030 } from './changelog'
 import { LOCAL_VERSION, checkUpdate, getAutoCheck, readCache, setAutoCheck as storeAutoCheck, setSkipVersion, type UpdateInfo, type UpdateStatus } from './updateCheck'
 import { Terminal } from 'xterm'
@@ -114,6 +115,8 @@ type SplitState = {
   yieldHealCount: number
   yieldHealTimer: number | null
   onSpecMutated: ((spec: LayoutSpec) => void) | null
+  /** Manual edits revoke that pane's automatic result binding; lockPane itself does not. */
+  onPaneContentEdited: ((projectId: string, paneId: string) => void) | null
   listeners: Set<() => void>
   open(spec: LayoutSpec): boolean
   close(): void
@@ -133,10 +136,6 @@ type SplitState = {
   /** 最大化/还原窗格（true = 独占内容区；单选语义：最大化 B 时自动还原 A） */
   setPaneMaximized(row: PaneRow, i: number, maximized: boolean): void
   openTab(row: PaneRow, i: number, content: SplitContent): void
-  /** 同 openTab，但同内容标签已存在时强制重载该标签的 iframe（再次打开预置链接 = 全新登录页） */
-  reopenTab(row: PaneRow, i: number, content: SplitContent): void
-  /** openTab/reopenTab 共用：按行列把窗格替换为 mutate 结果，落盘并通知 */
-  mutatePaneOpen(row: PaneRow, i: number, mutate: (pane: SplitPane) => SplitPane): void
   /** 锁定窗格：清空原有标签，把内容作为该窗唯一的固定标签（挂载产物的「锁死」语义） */
   lockPane(row: PaneRow, i: number, content: SplitContent): void
   closeTab(row: PaneRow, i: number, tabId: string): void
@@ -228,13 +227,6 @@ export function setSplitT(fn: ((key: string, params?: Record<string, string>) =>
 }
 export const T = (key: string, params?: Record<string, string>): string => (uiT ? uiT(key, params) : key)
 
-/** 强制重载计数（reopenTab 用）：tabId → 递增序号，PaneTabBody 透传为 iframe key（key 变 = 重挂载） */
-const reopenTick = new Map<string, number>()
-/** PaneTabBody/BrowserPane 读取：reopenTab 累加过的次数（参与 iframe key 计算） */
-export function reopenTickOf(tabId: string): number {
-  return reopenTick.get(tabId) ?? 0
-}
-
 /** 工作区环境（由工作台注入：当前会话作用域与后台任务列表） */
 export type SplitScope = { sessionId: string; cwd: string }
 export type SplitJob = {
@@ -268,6 +260,7 @@ export type ConsoleCardData = {
 }
 
 type SplitEnv = {
+  fillHostInput: (text: string) => boolean
   getScope: () => SplitScope | null
   getJobs: () => SplitJob[]
   getSubagents: () => any[]
@@ -543,8 +536,7 @@ function boxPayload(x0: number, y0: number, x1: number, y1: number): { primary: 
 }
 
 /** 更新方法：复制给 AI 的升级指令（插件不自更新；升级由用户或其 Agent 执行 + 重启） */
-const UPGRADE_CMD = 'dsh plugin --profile web add "https://github.com/wrw-dev/dsh-worktable/releases/latest/download/dsh-worktable.tgz"'
-const UPGRADE_AI = '帮我升级 dsh-worktable：执行 ' + UPGRADE_CMD + '，完成后提醒我重启 dsh web 并刷新页面'
+const { prompt: UPGRADE_AI } = worktableUpgrade()
 
 async function copyTextSafe(text: string): Promise<boolean> {
   try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true } } catch {}
@@ -561,25 +553,7 @@ async function copyTextSafe(text: string): Promise<boolean> {
 
 /** 注入宿主对话框输入框（不发送）；失败返回 false */
 function fillHostInput(text: string): boolean {
-  try {
-    const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-phase]')
-      ?? Array.from(document.querySelectorAll<HTMLTextAreaElement>('textarea')).pop()
-    if (!ta) return false
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-    // 连续标注：已有内容不顶掉，换行追加（用户可以同一对话连续标注多处）
-    const next = ta.value && ta.value.trim() ? ta.value + '\n\n' + text : text
-    if (setter) setter.call(ta, next)
-    else ta.value = next
-    ta.dispatchEvent(new Event('input', { bubbles: true }))
-    try {
-      ta.focus()
-      ta.dispatchEvent(new Event('change', { bubbles: true }))
-      ta.setSelectionRange(ta.value.length, ta.value.length)
-    } catch {}
-    return true
-  } catch {
-    return false
-  }
+  return splitEnv?.fillHostInput(text) ?? false
 }
 
 /** ✓ 确认：打包并注入，不发送 */
@@ -839,6 +813,7 @@ export const splitStore: SplitState = {
   yieldHealCount: 0,
   yieldHealTimer: null,
   onSpecMutated: null,
+  onPaneContentEdited: null,
   listeners: new Set(),
 
   open(spec) {
@@ -1287,7 +1262,7 @@ export const splitStore: SplitState = {
   lockPane(row, i, content) {
     const spec = this.spec
     if (!spec) return
-    const tab: PaneTab = { id: 't' + Date.now().toString(36), title: tabTitleOf(content), content, active: 0 }
+    const tab: PaneTab = { id: 't' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2), title: tabTitleOf(content), content, active: 0 }
     const mutate = (pane: SplitPane): SplitPane => ({ ...pane, content: null, tabs: [tab], active: 0 })
     if (row === 'left') {
       if (!spec.left || i !== 0) return
@@ -1312,6 +1287,8 @@ export const splitStore: SplitState = {
   setTabContent(row, index, tabId, content) {
     const spec = this.spec
     if (!spec) return
+    const edited = row === 'left' ? spec.left : row === 'top' ? spec.top?.[index] : spec.main[index]
+    if (edited?.tabs?.some((t) => t.id === tabId)) this.onPaneContentEdited?.(spec.id, edited.id)
     const mutate = (pane: SplitPane): SplitPane => {
       const tabs = (pane.tabs ?? []).map((t) => (t.id === tabId ? { ...t, content, title: tabTitleOf(content) } : t))
       return { ...pane, tabs }
@@ -1332,6 +1309,8 @@ export const splitStore: SplitState = {
   openTab(row, i, content) {
     const spec = this.spec
     if (!spec) return
+    const edited = row === 'left' ? spec.left : row === 'top' ? spec.top?.[i] : spec.main[i]
+    if (edited) this.onPaneContentEdited?.(spec.id, edited.id)
     const mutate = (pane: SplitPane): SplitPane => {
       const tabs = [...(pane.tabs ?? [])]
       // 去重：同内容已有标签 → 直接激活
@@ -1341,31 +1320,6 @@ export const splitStore: SplitState = {
       tabs.push(tab)
       return { ...pane, content: null, tabs, active: tabs.length - 1 }
     }
-    this.mutatePaneOpen(row, i, mutate)
-  },
-
-  reopenTab(row, i, content) {
-    const spec = this.spec
-    if (!spec) return
-    const mutate = (pane: SplitPane): SplitPane => {
-      const tabs = [...(pane.tabs ?? [])]
-      // 去重命中 → 激活 + bump 重载计数（iframe key 变化 = 重挂载，回到全新登录页）
-      const existing = tabs.findIndex((t) => sameContent(t.content, content))
-      if (existing >= 0) {
-        reopenTick.set(tabs[existing].id, (reopenTick.get(tabs[existing].id) ?? 0) + 1)
-        return { ...pane, content: null, tabs, active: existing }
-      }
-      const tab: PaneTab = { id: 't' + Date.now().toString(36), title: tabTitleOf(content), content }
-      tabs.push(tab)
-      return { ...pane, content: null, tabs, active: tabs.length - 1 }
-    }
-    this.mutatePaneOpen(row, i, mutate)
-  },
-
-  /** openTab/reopenTab 共用：按行列把窗格替换为 mutate 结果，落盘并通知 */
-  mutatePaneOpen(row: PaneRow, i: number, mutate: (pane: SplitPane) => SplitPane) {
-    const spec = this.spec
-    if (!spec) return
     if (row === 'left') {
       if (!spec.left || i !== 0) return
       this.spec = { ...spec, left: mutate(spec.left) }
@@ -1388,6 +1342,8 @@ export const splitStore: SplitState = {
   closeTab(row, i, tabId) {
     const spec = this.spec
     if (!spec) return
+    const edited = row === 'left' ? spec.left : row === 'top' ? spec.top?.[i] : spec.main[i]
+    if (edited?.tabs?.some((t) => t.id === tabId)) this.onPaneContentEdited?.(spec.id, edited.id)
     const mutate = (pane: SplitPane): SplitPane => {
       const tabs = (pane.tabs ?? []).filter((t) => t.id !== tabId)
       return { ...pane, tabs, active: 0 }
@@ -1426,6 +1382,8 @@ export const splitStore: SplitState = {
     if (!fromPane || !toPane) return
     const tab = (fromPane.tabs ?? []).find((t) => t.id === tabId)
     if (!tab) return
+    this.onPaneContentEdited?.(spec.id, fromPane.id)
+    this.onPaneContentEdited?.(spec.id, toPane.id)
     const fromTabs = (fromPane.tabs ?? []).filter((t) => t.id !== tabId)
     const toTabs = [...(toPane.tabs ?? []), tab]
     const setPane = (row: PaneRow, i: number, pane: SplitPane) => {
@@ -1714,20 +1672,11 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
   const initial = props.content?.url || 'https://example.com'
   const nav = useNavHistory(initial)
   const [url, setUrl] = useState(initial)
-  // 重载计数：标签栏 ↻（reloadKey）与 reopenTab（reopenTickOf，再点【打开】强制重载）叠加。
-  // key 变化 = iframe 重挂载 = 全新加载（跨源登录页也可靠，与标签 ↻ 同机制）。
-  const [reloadN, setReloadN] = useState(() => props.reloadKey + reopenTickOf(props.tabId))
   const [src, setSrc] = useState(initial)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const navRef = useRef(nav)
   navRef.current = nav
   const embed = useEmbedSrc(src)
-  // 外部强制重载（reopenTab bump）：reloadKey 未变时也把 iframe 重挂载
-  useEffect(() => {
-    const n = props.reloadKey + reopenTickOf(props.tabId)
-    if (n !== reloadN) { setReloadN(n); setSrc(initial); setUrl(initial) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.reloadKey, props.tabId])
   // 地址回写：刷新/重开布局时保持当前网址
   const commit = (raw: string) => splitStore.setTabContent(props.row, props.index, props.tabId, { kind: 'builtin', type: 'browser', url: raw })
   const go = () => {
@@ -1742,18 +1691,12 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
   const doBack = () => { const c = nav.back(); if (c != null) { setUrl(c); setSrc(c); commit(c) } }
   const doFwd = () => { const c = nav.fwd(); if (c != null) { setUrl(c); setSrc(c); commit(c) } }
   // 页面内导航上报：仅当来自本窗格 iframe，且确为新地址才记录（避免重复上报成堆历史）
-  // 填充脚本 (__wt_preset_fill) 也算「代理内页面」信号——逃逸检测依赖它区分。
-  const navSeenRef = useRef(false)
-  const recaptureRef = useRef(0)
-  const loadGenRef = useRef(0)
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const d = e.data as any
-      if (!d || (d.__wt_nav !== true && d.__wt_preset_fill !== true)) return
+      if (!d || d.__wt_nav !== true || typeof d.url !== 'string') return
       const fw = iframeRef.current?.contentWindow
       if (fw && e.source !== fw) return
-      navSeenRef.current = true
-      if (d.__wt_nav !== true || typeof d.url !== 'string') return
       const real = d.url
       if (real && real !== navRef.current.cur) {
         navRef.current.go(real)
@@ -1768,23 +1711,6 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
     return () => window.removeEventListener('message', onMsg)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  // 逃逸检测：登录成功后站点常用 JS 绝对地址跳转（location.href = 上游另一端口），iframe 直接
-  // 跳去上游真实地址——该页没有注入脚本（不发任何 __wt_* 上报），浏览器对上游源也没有会话
-  // Cookie（会话种在代理源）→ 停在登录页。代理页每次加载必发上报：load 后 1.5s 零上报 = 已逃逸
-  // → 重挂 iframe 回当前代理地址（站点见会话 Cookie 自动落首页，等价于手动重开一次【打开】）。
-  // 仅代理嵌入（proxied）检测；上限 3 次防异常页面循环。
-  const onFrameLoad = () => {
-    if (!embed.proxied) return
-    navSeenRef.current = false
-    const gen = ++loadGenRef.current
-    window.setTimeout(() => {
-      if (gen !== loadGenRef.current) return // 期间又发生新加载：本轮作废
-      if (navSeenRef.current) return
-      if (recaptureRef.current >= 3) return
-      recaptureRef.current += 1
-      setReloadN((n) => n + 1)
-    }, 1500)
-  }
   return (
     <>
       <div className="dsh-wt_browserBar">
@@ -1806,7 +1732,7 @@ function BrowserPane(props: { row: PaneRow; index: number; tabId: string; conten
       </div>
       {embed.src === null
         ? <div className="dsh-wt_paneFrame" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 12 }}>载入中…</div>
-        : <iframe ref={iframeRef} key={reloadN} className="dsh-wt_paneFrame" src={embed.src} title="browser" onLoad={onFrameLoad} />}
+        : <iframe ref={iframeRef} key={props.reloadKey} className="dsh-wt_paneFrame" src={embed.src} title="browser" />}
     </>
   )
 }
@@ -2852,9 +2778,8 @@ function TerminalPane() {
     focusTerm()
     el.addEventListener('pointerdown', focusTerm)
     const scope = splitEnv?.getScope?.()
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = proto + '//' + location.host + '/api/worktable/term?sessionId=' + encodeURIComponent(scope?.sessionId ?? '') + '&cwd=' + encodeURIComponent(scope?.cwd ?? '') + '&cols=80&rows=24'
     try {
+      const url = hostWebSocketUrl('/api/worktable/term?sessionId=' + encodeURIComponent(scope?.sessionId ?? '') + '&cwd=' + encodeURIComponent(scope?.cwd ?? '') + '&cols=80&rows=24')
       ws = new WebSocket(url)
     } catch {
       term.dispose()
@@ -3057,8 +2982,9 @@ function SelectPop(props: {
 }
 
 /** 自定义窗口：居中对话框。两种模式：新建专属会话 / 发送到已有会话（默认当前会话）。 */
-function CustomPane(props: { paneTitle?: string }) {
-  const paneTitle = props.paneTitle ?? ''
+function CustomPane(props: { paneTitle?: string; row?: PaneRow; index?: number }) {
+  const paneTitle = props.row === undefined ? (props.paneTitle ?? '') :
+    (windowLabelOf(props.row, props.index ?? 0).match(/^窗口\d+/)?.[0] ?? '')
   try { (window as any).__dshLastCustomPaneTitle = paneTitle } catch {}
   const custom = splitEnv?.custom
   const [requirement, setRequirement] = useState('')
@@ -3071,6 +2997,7 @@ function CustomPane(props: { paneTitle?: string }) {
   const [wsGroups, setWsGroups] = useState<{ id: string; title: string; path: string }[]>([])
   const [groupMode, setGroupMode] = useState<'none' | 'existing' | 'new'>('none')
   const [groupId, setGroupId] = useState<string | null>(null)
+  const groupTouchedRef = useRef(false)
   const [newGroupParent, setNewGroupParent] = useState('')
   const [newGroupName, setNewGroupName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -3090,7 +3017,8 @@ function CustomPane(props: { paneTitle?: string }) {
       setSessionId(flat.find((s) => s.isCurrent)?.id ?? flat[0]?.id ?? null)
       const curId = flat.find((s) => s.isCurrent)?.id
       const home = curId ? (custom?.getWorkspaces?.() ?? []).find((w) => (w.sessionIds ?? []).includes(curId)) : null
-      if (home) { setGroupMode('existing'); setGroupId(home.id) }
+      // A delayed default lookup must not overwrite the user's explicit choice.
+      if (home && !groupTouchedRef.current) { setGroupMode('existing'); setGroupId(home.id) }
     }).catch(() => { setSessionGroups([]) })
   }, [custom])
   const submit = async () => {
@@ -3191,6 +3119,7 @@ function CustomPane(props: { paneTitle?: string }) {
               }]}
               placeholder={T('custom.group')}
               onChange={(id) => {
+                groupTouchedRef.current = true
                 if (id === '__none') setGroupMode('none')
                 else if (id === '__new') setGroupMode('new')
                 else { setGroupMode('existing'); setGroupId(id) }
@@ -3248,7 +3177,7 @@ function PaneTabBody(props: { tab: PaneTab; row: PaneRow; index: number; paneTit
   if (content.type === 'scm') return <GitPane />
   if (content.type === 'tasks') return <JobsPane />
   if (content.type === 'terminal') return <TerminalPane />
-  if (content.type === 'custom') return <CustomPane paneTitle={props.paneTitle ?? ''} />
+  if (content.type === 'custom') return <CustomPane paneTitle={props.paneTitle ?? ''} row={props.row} index={props.index} />
   if (content.type === 'presets') return <PresetsPane row={props.row} index={props.index} tabId={props.tab.id} barActions={props.barActions} />
   return (
     <div className="dsh-wt_paneWip">
